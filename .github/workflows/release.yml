@@ -1,0 +1,252 @@
+name: Publish Official Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version for manual run (example: 1.2.3)"
+        required: false
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      feed_url: ${{ steps.meta.outputs.feed_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Resolve Python executable
+        id: python-runtime
+        shell: pwsh
+        run: |
+          $pythonExe = (Get-Command python -ErrorAction Stop).Source
+          if (-not (Test-Path $pythonExe)) {
+            throw "Python executable not found: $pythonExe"
+          }
+          Write-Host "Python executable: $pythonExe"
+          python --version
+          "python_exe=$pythonExe" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Resolve release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $versionInput = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($versionInput)) {
+            $refName = "${{ github.ref_name }}"
+            if ($refName -match '^v\d+\.\d+\.\d+([\-+\.][0-9A-Za-z.-]+)?$') {
+              $versionInput = $refName.Substring(1)
+            } elseif ($refName -match '^\d+\.\d+\.\d+([\-+\.][0-9A-Za-z.-]+)?$') {
+              $versionInput = $refName
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($versionInput)) {
+            $mainText = Get-Content main.py -Raw
+            $versionMatch = [regex]::Match($mainText, '(?m)^\s*APP_VERSION\s*=\s*"([^"]+)"')
+            if ($versionMatch.Success) {
+              $versionInput = $versionMatch.Groups[1].Value
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($versionInput)) {
+            throw "Release version is required. Use a tag like v1.2.3, provide workflow_dispatch input, or set APP_VERSION in main.py."
+          }
+          if ($versionInput -notmatch '^\d+\.\d+\.\d+([\-+\.][0-9A-Za-z.-]+)?$') {
+            throw "Invalid version format: $versionInput"
+          }
+
+          $feedUrl = "https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/gh-pages/update-feed.json"
+
+          "version=$versionInput" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "feed_url=$feedUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Write-Host "Version: $versionInput"
+          Write-Host "Feed URL: $feedUrl"
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt --disable-pip-version-check --progress-bar off
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Resolve Inno Setup compiler
+        id: inno
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+
+          $isccExe = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+              $isccExe = $candidate
+              break
+            }
+          }
+
+          if (-not $isccExe) {
+            $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+            if ($isccCmd) {
+              $isccExe = $isccCmd.Source
+            }
+          }
+
+          if (-not $isccExe) {
+            throw "Unable to locate ISCC.exe after installing Inno Setup."
+          }
+
+          Write-Host "ISCC executable: $isccExe"
+          "iscc_exe=$isccExe" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build installer and portable artifacts
+        shell: pwsh
+        env:
+          PDF_AUTOTOOL_PYTHON: ${{ steps.python-runtime.outputs.python_exe }}
+          PDF_AUTOTOOL_ISCC: ${{ steps.inno.outputs.iscc_exe }}
+          PDF_AUTOTOOL_VERSION: ${{ steps.meta.outputs.version }}
+          PDF_AUTOTOOL_UPDATE_FEED_URL: ${{ steps.meta.outputs.feed_url }}
+        run: |
+          $buildLog = "build_release.log"
+          if (Test-Path $buildLog) {
+            Remove-Item $buildLog -Force
+          }
+
+          cmd /c "build_release.bat" *>&1 | Tee-Object -FilePath $buildLog
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Build failed with exit code $LASTEXITCODE"
+            Write-Host "Last 200 lines from build_release.log:"
+            Get-Content $buildLog -Tail 200
+            exit $LASTEXITCODE
+          }
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-manifest -Force | Out-Null
+          $files = @(
+            "dist/installer/PDFRecordManager-Setup.exe",
+            "dist/portable/PDFRecordManager-Portable.zip",
+            "dist/portable/PDFRecordManager-Portable/PDFRecordManager.exe"
+          )
+
+          $hashLines = @()
+          foreach ($file in $files) {
+            if (-not (Test-Path $file)) {
+              throw "Missing expected file for checksum generation: $file"
+            }
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $file).Hash.ToLowerInvariant()
+            $name = Split-Path -Leaf $file
+            $hashLines += "$hash  $name"
+          }
+
+          $hashLines | Out-File -FilePath release-manifest/SHA256SUMS.txt -Encoding ascii
+          Get-Content release-manifest/SHA256SUMS.txt
+
+      - name: Upload build logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          if-no-files-found: ignore
+          path: |
+            build_release.log
+            installer_build.log
+            build/**/*.txt
+            build/**/*.html
+            build/**/*.toc
+
+      - name: Generate update feed JSON
+        shell: pwsh
+        run: |
+          python scripts/generate_update_feed.py `
+            --version "${{ steps.meta.outputs.version }}" `
+            --repository "${{ github.repository }}" `
+            --output "release-manifest/update-feed.json" `
+            --notes "Release ${{ steps.meta.outputs.version }}"
+          Get-Content release-manifest/update-feed.json
+
+      - name: Upload update feed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-feed-site
+          path: release-manifest/update-feed.json
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            dist/installer/PDFRecordManager-Setup.exe
+            dist/portable/PDFRecordManager-Portable.zip
+            release-manifest/SHA256SUMS.txt
+            release-manifest/update-feed.json
+
+  deploy-update-feed:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download feed artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: update-feed-site
+          path: site
+
+      - name: Add index page
+        shell: bash
+        run: |
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>PDF Record Manager Update Feed</title>
+            </head>
+            <body>
+              <h1>PDF Record Manager Update Feed</h1>
+              <p>This site hosts update-feed.json consumed by the app.</p>
+              <p><a href="./update-feed.json">Open update-feed.json</a></p>
+            </body>
+          </html>
+          HTML
+
+      - name: Publish update feed to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
+          publish_branch: gh-pages
+          force_orphan: true

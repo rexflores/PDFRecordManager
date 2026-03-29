@@ -1,0 +1,7 @@
+{
+  "version": "1.0.1",
+  "installer_url": "https://example.com/downloads/PDFRecordManager-Setup.exe",
+  "portable_url": "https://example.com/downloads/PDFRecordManager-Portable.zip",
+  "release_page_url": "https://github.com/OWNER/REPO/releases/latest",
+  "notes": "Optional release notes displayed in the app update prompt."
+}
