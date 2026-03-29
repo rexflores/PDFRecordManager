@@ -13,6 +13,7 @@ build/
 dist/
 *.egg-info/
 installer_build.log
+build_run_logs
 
 # Tool caches
 .pytest_cache/
