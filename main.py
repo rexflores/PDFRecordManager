@@ -12,7 +12,7 @@ import urllib.request
 import math
 from datetime import datetime
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 try:
     from PIL import Image, ImageDraw, ImageTk
@@ -86,7 +86,7 @@ LISTBOX_TEXT = "#e5ecf8"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.2"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 DEFAULT_UPDATE_MANIFEST_URL = ""
@@ -103,6 +103,7 @@ TOOLBAR_ICON_SELECT_PARTIAL = "\u25a3"
 TOOLBAR_ICON_SOURCE_ADD = "\u2795"
 TOOLBAR_ICON_SOURCE_REMOVE = "\u2796"
 TOOLBAR_ICON_SOURCE_CLEAR = "\u2715"
+TOOLBAR_ICON_EDIT = "\u270e"
 
 
 def _find_app_icon_path():
@@ -575,6 +576,46 @@ def _create_toolbar_icon_image(icon_name, size=TOOLBAR_ICON_SIZE, color=TOOLBAR_
             fill=rgba,
             width=stroke,
         )
+    elif icon_name == "edit":
+        shaft_start = (int(canvas_size * 0.30), int(canvas_size * 0.70))
+        shaft_end = (int(canvas_size * 0.70), int(canvas_size * 0.30))
+        draw.line(
+            (
+                shaft_start[0],
+                shaft_start[1],
+                shaft_end[0],
+                shaft_end[1],
+            ),
+            fill=rgba,
+            width=stroke,
+        )
+
+        tip = [
+            (int(canvas_size * 0.70), int(canvas_size * 0.30)),
+            (int(canvas_size * 0.79), int(canvas_size * 0.22)),
+            (int(canvas_size * 0.76), int(canvas_size * 0.35)),
+        ]
+        draw.polygon(tip, fill=rgba)
+
+        eraser_bounds = (
+            int(canvas_size * 0.22),
+            int(canvas_size * 0.69),
+            int(canvas_size * 0.33),
+            int(canvas_size * 0.80),
+        )
+        draw.rectangle(eraser_bounds, outline=rgba, width=max(2, stroke - int(0.5 * scale)))
+
+        baseline_y = int(canvas_size * 0.84)
+        draw.line(
+            (
+                int(canvas_size * 0.18),
+                baseline_y,
+                int(canvas_size * 0.44),
+                baseline_y,
+            ),
+            fill=rgba,
+            width=max(2, stroke - int(0.7 * scale)),
+        )
     else:
         return None
 
@@ -592,6 +633,7 @@ def _build_pending_toolbar_icon_images():
     for icon_name in (
         "refresh",
         "preview",
+        "edit",
         "select_all",
         "select_none",
         "select_partial",
@@ -1121,6 +1163,7 @@ employee_sources_listbox = None
 employee_source_paths = []
 employee_list_status_var = tk.StringVar(value="No employee sources selected.")
 employee_name_suggestions = []
+pending_files_count_var = tk.StringVar(value="(0)")
 name_filter_mode = tk.StringVar(value="strict")
 _suppress_name_filter_refresh = False
 
@@ -1246,6 +1289,7 @@ _PDF_NAME_START_PATTERN = re.compile(
     r"^\s*([A-Z][A-Za-z'\- ]+,\s+[A-Z][A-Za-z.'\- ]+?)(?=\s{2,}|\t|$)"
 )
 _NAME_SUFFIXES = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "v"}
+_MAX_GIVEN_NAME_TOKENS = 10
 _PDF_COLUMN_HEADER_LABELS = {
     "name",
     "employee name",
@@ -1290,11 +1334,14 @@ def _extract_pdf_names_from_text(text):
                 base_candidate = normalized
 
         if "," in base_candidate:
-            candidate = _extract_comma_prefix_candidate(base_candidate, max_given_tokens=6)
+            candidate = _extract_comma_prefix_candidate(
+                base_candidate,
+                max_given_tokens=_MAX_GIVEN_NAME_TOKENS,
+            )
         else:
             candidate = base_candidate
 
-        if _line_passes_filter(candidate):
+        if _line_passes_filter(candidate, allow_mononym=True):
             candidates.append(candidate)
 
     return candidates
@@ -1338,11 +1385,14 @@ def _extract_pdf_names_from_tables(page):
                 continue
 
             if "," in normalized:
-                candidate = _extract_comma_prefix_candidate(normalized, max_given_tokens=6)
+                candidate = _extract_comma_prefix_candidate(
+                    normalized,
+                    max_given_tokens=_MAX_GIVEN_NAME_TOKENS,
+                )
             else:
                 candidate = normalized
 
-            if _line_passes_filter(candidate):
+            if _line_passes_filter(candidate, allow_mononym=True):
                 extracted.append(candidate)
 
     return extracted
@@ -1430,23 +1480,24 @@ def _extract_comma_prefix_candidate(raw_value, max_given_tokens=None):
                 break
             continue
 
-        # After a middle initial, additional tokens are usually from the next column.
-        if given_tokens and _is_initial_token(given_tokens[-1]) and token.lower() not in _NAME_SUFFIXES:
-            break
-
         # In many table exports the nickname column repeats a prior name token.
         if given_tokens and token.lower() in {existing.lower() for existing in given_tokens}:
             break
 
         # Stop before compact uppercase codes from following columns.
-        if given_tokens and token.isupper() and len(token) <= 3:
+        if (
+            given_tokens
+            and token.isupper()
+            and len(token) in (2, 3)
+            and token.lower() not in _NAME_SUFFIXES
+        ):
             break
 
         given_tokens.append(token)
 
         if max_given_tokens and len(given_tokens) >= max_given_tokens:
             break
-        if len(given_tokens) >= 6:
+        if len(given_tokens) >= _MAX_GIVEN_NAME_TOKENS:
             break
 
     if not given_tokens:
@@ -1524,7 +1575,7 @@ def _extract_name_column_candidates(lines):
         row.append(lines[idx])
         if len(row) == column_count:
             candidate = _normalize_candidate_line(row[name_index])
-            if _line_passes_filter(candidate) and not _is_header_row(candidate):
+            if _line_passes_filter(candidate, allow_mononym=True) and not _is_header_row(candidate):
                 candidates.append(candidate)
             row = []
         idx += 1
@@ -1538,7 +1589,7 @@ def _extract_first_column_candidates(lines):
         if len(columns) < 2:
             continue
         candidate = _normalize_candidate_line(columns[0])
-        if _line_passes_filter(candidate) and not _is_header_row(candidate):
+        if _line_passes_filter(candidate, allow_mononym=True) and not _is_header_row(candidate):
             candidates.append(candidate)
     return candidates
 
@@ -1554,11 +1605,11 @@ def _infer_given_name_token_limit(candidates):
             counts.append(token_count)
 
     if not counts:
-        return 3
+        return min(6, _MAX_GIVEN_NAME_TOKENS)
     counts.sort()
     percentile_index = int((len(counts) - 1) * 0.9)
     inferred = counts[percentile_index]
-    return max(2, min(6, inferred))
+    return max(2, min(_MAX_GIVEN_NAME_TOKENS, inferred))
 
 
 def _extract_comma_line_candidates(lines, max_given_tokens):
@@ -1578,17 +1629,36 @@ def _extract_single_cell_candidates(lines):
         if _is_header_row(line):
             continue
         candidate = _normalize_candidate_line(line)
-        if _line_passes_filter(candidate):
+        if _line_passes_filter(candidate, allow_mononym=True):
             candidates.append(candidate)
     return candidates
 
 
-def _line_passes_filter(normalized_line):
+def _looks_like_mononym_name(normalized_line):
+    value = _normalize_candidate_line(normalized_line)
+    if not value or "," in value or " " in value:
+        return False
+    if len(value) < 2:
+        return False
+    if any(ch.isdigit() for ch in value):
+        return False
+    if not _NAME_TOKEN_RE.fullmatch(value):
+        return False
+    if value.isupper() and len(value) <= 3:
+        return False
+    return any(ch.isalpha() for ch in value)
+
+
+def _line_passes_filter(normalized_line, allow_mononym=False):
     if not normalized_line:
         return False
     mode = name_filter_mode.get()
     if mode == "strict":
-        return "," in normalized_line and any(ch.isalpha() for ch in normalized_line)
+        if "," in normalized_line and any(ch.isalpha() for ch in normalized_line):
+            return True
+        if allow_mononym and _looks_like_mononym_name(normalized_line):
+            return True
+        return False
     return any(ch.isalpha() for ch in normalized_line) and len(normalized_line) >= 3
 
 
@@ -1612,7 +1682,7 @@ def _collect_extracted_candidates(raw_lines, bucket):
         combined_candidates = _extract_single_cell_candidates(lines)
 
     for candidate in combined_candidates:
-        if _line_passes_filter(candidate):
+        if _line_passes_filter(candidate, allow_mononym=True):
             bucket.add(candidate)
 
 
@@ -1718,7 +1788,7 @@ def load_employee_name_suggestions(progress_callback=None):
                     progress_callback(f"Processed source {index}/{total_sources}: {source_name}", index, total_sources)
                 continue
             for candidate in pdf_name_lines:
-                if _line_passes_filter(candidate):
+                if _line_passes_filter(candidate, allow_mononym=True):
                     suggestions.add(candidate)
         elif extension in (".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"):
             try:
@@ -2011,6 +2081,17 @@ def _update_combobox_suggestions(combobox, query_text, event=None):
         combobox.after_idle(lambda: _show_suggestion_popup(combobox, suggestions))
     else:
         combobox.after_idle(lambda: _hide_suggestion_popup(combobox))
+
+
+def _prevent_combobox_mousewheel_value_change(combobox):
+    def _on_wheel(event=None):
+        if event is not None:
+            _dispatch_global_mousewheel(event)
+        return "break"
+
+    combobox.bind("<MouseWheel>", _on_wheel, add="+")
+    combobox.bind("<Button-4>", _on_wheel, add="+")
+    combobox.bind("<Button-5>", _on_wheel, add="+")
 
 
 def _set_update_status(message):
@@ -2389,20 +2470,225 @@ def merge_pdf_files(new_pdf_path, existing_pdf_path, output_path):
 def parse_filename_metadata(filename):
     base_name = os.path.splitext(filename)[0]
     parts = base_name.split("_")
-    if len(parts) < 3:
+    if len(parts) < 2:
         return None
 
-    last_two = parts[-2:]
-    if not all(segment.isdigit() for segment in last_two):
+    latest_year = ""
+    earliest_year = ""
+    employee_name = ""
+
+    if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+        latest_val = max(int(parts[-2]), int(parts[-1]))
+        earliest_val = min(int(parts[-2]), int(parts[-1]))
+        latest_year = str(latest_val)
+        earliest_year = str(earliest_val)
+        employee_name = "_".join(parts[:-2])
+    elif parts[-1].isdigit():
+        latest_year = str(int(parts[-1]))
+        earliest_year = ""
+        employee_name = "_".join(parts[:-1])
+    else:
         return None
 
-    latest_year, earliest_year = last_two
-    employee_name = "_".join(parts[:-2])
+    if not employee_name.strip():
+        return None
+
     return {
         "name": employee_name,
         "latest": latest_year,
         "earliest": earliest_year,
     }
+
+
+def _normalize_record_year_inputs(latest_text, earliest_text):
+    latest = str(latest_text or "").strip()
+    earliest = str(earliest_text or "").strip()
+
+    if latest and not latest.isdigit():
+        raise ValueError("Latest Year must be numeric.")
+    if earliest and not earliest.isdigit():
+        raise ValueError("Oldest Year must be numeric.")
+
+    if not latest and not earliest:
+        return None
+
+    if latest and earliest:
+        latest_year = max(int(latest), int(earliest))
+        earliest_year = min(int(latest), int(earliest))
+    else:
+        single_year = int(latest or earliest)
+        latest_year = single_year
+        earliest_year = single_year
+
+    return latest_year, earliest_year
+
+
+def _build_record_filename(name, latest_year, earliest_year):
+    latest_int = int(latest_year)
+    earliest_int = int(earliest_year)
+    if latest_int == earliest_int:
+        return f"{name}_{latest_int}.pdf"
+    return f"{name}_{latest_int}_{earliest_int}.pdf"
+
+
+def _validate_filesystem_component_name(raw_value, value_label):
+    value = str(raw_value or "").strip()
+    if not value:
+        raise ValueError(f"{value_label} cannot be empty.")
+    if value in {".", ".."}:
+        raise ValueError(f"{value_label} cannot be '.' or '..'.")
+    if value[-1] in {" ", "."}:
+        raise ValueError(f"{value_label} cannot end with a space or period.")
+
+    invalid_chars = '<>:"/\\|?*'
+    bad_chars = [ch for ch in invalid_chars if ch in value]
+    if bad_chars:
+        raise ValueError(
+            f"{value_label} contains invalid characters: {' '.join(bad_chars)}"
+        )
+
+    reserved_names = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    }
+    if value.split(".")[0].upper() in reserved_names:
+        raise ValueError(f"{value_label} uses a reserved Windows name.")
+
+    return value
+
+
+def _format_editor_datetime(dt_value):
+    return dt_value.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_editor_datetime_input(raw_value, label):
+    value = str(raw_value or "").strip()
+    if not value:
+        raise ValueError(f"{label} is required.")
+
+    accepted_formats = (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    )
+    for dt_format in accepted_formats:
+        try:
+            parsed = datetime.strptime(value, dt_format)
+            if dt_format == "%Y-%m-%d":
+                parsed = parsed.replace(hour=0, minute=0, second=0)
+            return parsed
+        except ValueError:
+            continue
+
+    raise ValueError(f"{label} format is invalid. Use YYYY-MM-DD HH:MM[:SS].")
+
+
+def _set_file_creation_and_modified_time(file_path, created_dt, modified_dt):
+    if modified_dt is not None:
+        stats = os.stat(file_path)
+        os.utime(file_path, (stats.st_atime, modified_dt.timestamp()))
+
+    if not sys.platform.startswith("win"):
+        return
+
+    if created_dt is None and modified_dt is None:
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [
+            ("dwLowDateTime", wintypes.DWORD),
+            ("dwHighDateTime", wintypes.DWORD),
+        ]
+
+    def _to_filetime(dt_value):
+        intervals = int(dt_value.timestamp() * 10_000_000) + 116_444_736_000_000_000
+        return FILETIME(intervals & 0xFFFFFFFF, intervals >> 32)
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    set_file_time = kernel32.SetFileTime
+    close_handle = kernel32.CloseHandle
+
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+
+    set_file_time.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+    ]
+    set_file_time.restype = wintypes.BOOL
+
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    FILE_WRITE_ATTRIBUTES = 0x0100
+    FILE_SHARE_READ = 0x00000001
+    FILE_SHARE_WRITE = 0x00000002
+    FILE_SHARE_DELETE = 0x00000004
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x00000080
+    INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
+
+    file_handle = create_file(
+        file_path,
+        FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+
+    if file_handle == INVALID_HANDLE_VALUE:
+        raise OSError(f"Unable to access file attributes for {os.path.basename(file_path)}.")
+
+    created_filetime = _to_filetime(created_dt) if created_dt is not None else None
+    modified_filetime = _to_filetime(modified_dt) if modified_dt is not None else None
+
+    try:
+        success = set_file_time(
+            file_handle,
+            ctypes.byref(created_filetime) if created_filetime is not None else None,
+            None,
+            ctypes.byref(modified_filetime) if modified_filetime is not None else None,
+        )
+        if not success:
+            raise OSError(f"Unable to update timestamps for {os.path.basename(file_path)}.")
+    finally:
+        close_handle(file_handle)
 
 
 def archive_pending_file(pending_path):
@@ -2542,6 +2828,67 @@ def clear_employee_sources():
             heading="Removing all source files",
             initial_status="Clearing source list...",
         )
+
+
+def show_parsed_names_window():
+    win = tk.Toplevel(root)
+    _apply_app_icon(win)
+    win.title("Parsed Employee Names")
+    configure_window_geometry(
+        win,
+        520,
+        620,
+        min_width=420,
+        min_height=360,
+        margin_x=DEFAULT_MARGIN_X,
+        margin_y=DEFAULT_MARGIN_Y,
+    )
+    win.transient(root)
+    win.lift()
+    win.focus_force()
+    apply_theme(win)
+
+    content = ttk.Frame(win, padding=16, style="TFrame")
+    content.pack(fill="both", expand=True)
+
+    parsed_count = len(employee_name_suggestions)
+    parsed_text = "name" if parsed_count == 1 else "names"
+
+    ttk.Label(
+        content,
+        text=f"Parsed employee names: {parsed_count} {parsed_text}",
+        style="Card.TLabel",
+    ).pack(anchor="w", pady=(0, 10))
+
+    if parsed_count == 0:
+        ttk.Label(
+            content,
+            text="No names parsed yet. Add employee source files to populate this list.",
+            style="Subheading.TLabel",
+            justify="left",
+            wraplength=460,
+        ).pack(anchor="w")
+        ttk.Button(content, text="Close", command=win.destroy).pack(anchor="e", pady=(12, 0))
+        return
+
+    list_container = ttk.Frame(content, style="Card.TFrame", padding=8)
+    list_container.pack(fill="both", expand=True)
+
+    names_scrollbar = ttk.Scrollbar(list_container, orient="vertical")
+    names_scrollbar.pack(side="right", fill="y")
+
+    names_listbox = tk.Listbox(
+        list_container,
+        yscrollcommand=names_scrollbar.set,
+    )
+    _apply_modern_listbox_style(names_listbox, compact=True, export_selection=False)
+    names_listbox.pack(side="left", fill="both", expand=True)
+    names_scrollbar.configure(command=names_listbox.yview)
+
+    for name in employee_name_suggestions:
+        names_listbox.insert(tk.END, name)
+
+    ttk.Button(content, text="Close", command=win.destroy).pack(anchor="e", pady=(12, 0))
         
 pending_items_frame = None
 pending_file_vars = {}
@@ -2552,6 +2899,7 @@ pending_row_preview_buttons = []
 add_sources_button = None
 remove_sources_button = None
 clear_sources_button = None
+view_parsed_names_button = None
 pending_refresh_button = None
 pending_preview_button = None
 pending_master_toggle_button = None
@@ -2688,6 +3036,7 @@ def _update_icon_button_labels():
         (add_sources_button, "source_add", TOOLBAR_ICON_SOURCE_ADD, "Add Sources"),
         (remove_sources_button, "source_remove", TOOLBAR_ICON_SOURCE_REMOVE, "Remove Selected"),
         (clear_sources_button, "clear_selection", TOOLBAR_ICON_SOURCE_CLEAR, "Clear All"),
+        (view_parsed_names_button, "preview", TOOLBAR_ICON_PREVIEW, "View Parsed"),
         (pending_refresh_button, "refresh", TOOLBAR_ICON_REFRESH, "Refresh"),
         (pending_preview_button, "preview", TOOLBAR_ICON_PREVIEW, "Preview"),
     )
@@ -2865,10 +3214,15 @@ def _ensure_auto_refresh_job():
         _schedule_auto_refresh()
 
 
+def _set_pending_files_count(count):
+    pending_files_count_var.set(f"({max(0, int(count))})")
+
+
 def load_pending_files():
     global pending_file_vars, pending_row_preview_buttons
     if pending_items_frame is None:
         pending_row_preview_buttons = []
+        _set_pending_files_count(0)
         _refresh_pending_master_toggle_state()
         _set_pending_snapshot()
         return
@@ -2881,6 +3235,7 @@ def load_pending_files():
     folder = normalize_path(pending_folder.get())
     if not folder:
         pending_file_vars = {}
+        _set_pending_files_count(0)
         _refresh_pending_master_toggle_state()
         _set_pending_snapshot()
         return
@@ -2890,9 +3245,12 @@ def load_pending_files():
     except OSError as exc:
         messagebox.showerror("Error", f"Unable to load pending PDFs: {exc}")
         pending_file_vars = {}
+        _set_pending_files_count(0)
         _refresh_pending_master_toggle_state()
         _set_pending_snapshot()
         return
+
+    _set_pending_files_count(len(files))
 
     previous_state = {name: var.get() for name, var in pending_file_vars.items()}
     pending_file_vars = {}
@@ -3050,6 +3408,11 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             on_complete(processed_successfully, filename)
             completion_reported = True
 
+    def cancel_batch_processing_from_new_record():
+        if batch_context is not None:
+            batch_context["cancelled"] = True
+        close_window()
+
     # Variables
     name_var = tk.StringVar()
     letter_var = tk.StringVar()
@@ -3092,11 +3455,14 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     header = ttk.Frame(content)
     header.pack(fill="x", pady=(0, 12))
     ttk.Label(header, text=f"Pending file: {filename}", style="Subheading.TLabel").pack(anchor="w")
+    header_actions = ttk.Frame(header, style="TFrame")
+    header_actions.pack(anchor="w", pady=(4, 0))
     ttk.Button(
-        header,
+        header_actions,
         text="Preview Pending",
+        width=16,
         command=lambda: preview_specific_pending_pdf(filename),
-    ).pack(anchor="w", pady=(4, 0))
+    ).pack(side="left")
     if batch_context:
         ttk.Label(
             header,
@@ -3104,6 +3470,18 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             style="Card.TLabel",
             padding=4,
         ).pack(anchor="w", pady=(4, 0))
+        ttk.Button(
+            header_actions,
+            text="View Batch Files",
+            width=16,
+            command=lambda: show_selected_batch_files_window(
+                batch_files=batch_context.get("files"),
+                current_filename=filename,
+                parent_window=win,
+                batch_context=batch_context,
+                cancel_batch_callback=cancel_batch_processing_from_new_record,
+            ),
+        ).pack(side="left", padx=(8, 0))
 
     # UI
     ttk.Label(content, text="Name:").pack(anchor="w")
@@ -3113,6 +3491,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         values=employee_name_suggestions,
         state="normal",
     )
+    _prevent_combobox_mousewheel_value_change(name_field)
 
     def _handle_name_key(event=None):
         # Keep user input untouched and only refresh/open suggestion list.
@@ -3184,17 +3563,18 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         letter_value = letter_var.get().strip().upper() or (name[0].upper() if name else "")
         letter = letter_value if letter_value else "#"
         status = status_var.get()
-        new_year_str = new_year_var.get()
-        old_year_str = old_year_var.get()
+        new_year_str = new_year_var.get().strip()
+        old_year_str = old_year_var.get().strip()
 
-        if not (new_year_str and old_year_str):
-            messagebox.showerror("Error", "Both year fields are required.")
+        try:
+            years = _normalize_record_year_inputs(new_year_str, old_year_str)
+        except ValueError as exc:
+            messagebox.showerror("Error", str(exc))
             return
-        if not (new_year_str.isdigit() and old_year_str.isdigit()):
-            messagebox.showerror("Error", "Year fields must be numeric.")
+        if years is None:
+            messagebox.showerror("Error", "Enter at least one year (Latest or Oldest).")
             return
-        latest_year = max(int(new_year_str), int(old_year_str))
-        earliest_year = min(int(new_year_str), int(old_year_str))
+        latest_year, earliest_year = years
 
         # Build path
         target_folder = normalize_path(os.path.join(root_path, status, letter, name))
@@ -3217,7 +3597,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             os.makedirs(target_folder, exist_ok=True)
 
         # New filename
-        new_filename = f"{name}_{latest_year}_{earliest_year}.pdf"
+        new_filename = _build_record_filename(name, latest_year, earliest_year)
         new_path = normalize_path(os.path.join(target_folder, new_filename))
 
         # Check duplicate
@@ -3334,6 +3714,11 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             on_complete(processed_successfully, pending_filename)
             completion_reported = True
 
+    def cancel_batch_processing_from_merge():
+        if batch_context is not None:
+            batch_context["cancelled"] = True
+        close_merge_window()
+
     def keep_merge_window_on_top():
         try:
             win.lift()
@@ -3346,11 +3731,14 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     header = ttk.Frame(content)
     header.pack(fill="x", pady=(0, 12))
     ttk.Label(header, text=f"Pending file: {pending_filename}", style="Subheading.TLabel").pack(anchor="w")
+    header_actions = ttk.Frame(header, style="TFrame")
+    header_actions.pack(anchor="w", pady=(4, 0))
     ttk.Button(
-        header,
+        header_actions,
         text="Preview Pending",
+        width=16,
         command=lambda: preview_specific_pending_pdf(pending_filename),
-    ).pack(anchor="w", pady=(4, 0))
+    ).pack(side="left")
     if batch_context:
         ttk.Label(
             header,
@@ -3358,6 +3746,18 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             style="Card.TLabel",
             padding=4,
         ).pack(anchor="w", pady=(4, 0))
+        ttk.Button(
+            header_actions,
+            text="View Batch Files",
+            width=16,
+            command=lambda: show_selected_batch_files_window(
+                batch_files=batch_context.get("files"),
+                current_filename=pending_filename,
+                parent_window=win,
+                batch_context=batch_context,
+                cancel_batch_callback=cancel_batch_processing_from_merge,
+            ),
+        ).pack(side="left", padx=(8, 0))
 
     def close_merge_window():
         try:
@@ -3380,6 +3780,8 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     merge_summary_var = tk.StringVar(value="Select an existing PDF to view page counts.")
     keep_backup_var = keep_backup_preference_var
     folder_path_suggestions = []
+    folder_suggestion_entries = []
+    folder_suggestion_label_to_path = {}
     existing_files_frame = None
 
     def update_merge_summary():
@@ -3439,18 +3841,20 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             dest_preview_var.set("Enter the employee name to preview final path.")
             update_merge_summary()
             return
-        if not (latest and earliest):
-            dest_preview_var.set("Enter both year values to preview final path.")
-            update_merge_summary()
-            return
-        if not (latest.isdigit() and earliest.isdigit()):
+
+        try:
+            years = _normalize_record_year_inputs(latest, earliest)
+        except ValueError:
             dest_preview_var.set("Year fields must be numeric to preview final path.")
             update_merge_summary()
             return
+        if years is None:
+            dest_preview_var.set("Enter at least one year to preview final path.")
+            update_merge_summary()
+            return
 
-        latest_val = max(int(latest), int(earliest))
-        earliest_val = min(int(latest), int(earliest))
-        filename = f"{name}_{latest_val}_{earliest_val}.pdf"
+        latest_val, earliest_val = years
+        filename = _build_record_filename(name, latest_val, earliest_val)
         dest_preview_var.set(normalize_path(os.path.join(folder, filename)))
 
         update_merge_summary()
@@ -3488,6 +3892,51 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             name_var.set(folder_name)
             letter_var.set(folder_name[0].upper())
 
+    def _validate_windows_path_component(raw_value, value_label):
+        value = str(raw_value or "").strip()
+        if not value:
+            raise ValueError(f"{value_label} cannot be empty.")
+        if value in {".", ".."}:
+            raise ValueError(f"{value_label} cannot be '.' or '..'.")
+        if value[-1] in {" ", "."}:
+            raise ValueError(f"{value_label} cannot end with a space or period.")
+
+        invalid_chars = '<>:"/\\|?*'
+        bad_chars = [ch for ch in invalid_chars if ch in value]
+        if bad_chars:
+            raise ValueError(
+                f"{value_label} contains invalid characters: {' '.join(bad_chars)}"
+            )
+
+        reserved_names = {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM3",
+            "COM4",
+            "COM5",
+            "COM6",
+            "COM7",
+            "COM8",
+            "COM9",
+            "LPT1",
+            "LPT2",
+            "LPT3",
+            "LPT4",
+            "LPT5",
+            "LPT6",
+            "LPT7",
+            "LPT8",
+            "LPT9",
+        }
+        if value.split(".")[0].upper() in reserved_names:
+            raise ValueError(f"{value_label} uses a reserved Windows name.")
+
+        return value
+
     def _scan_employee_folder_paths():
         discovered = []
         try:
@@ -3523,25 +3972,12 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         return discovered
 
     def _refresh_folder_autocomplete_catalog():
-        nonlocal folder_path_suggestions
+        nonlocal folder_path_suggestions, folder_suggestion_entries, folder_suggestion_label_to_path
         scanned_paths = _scan_employee_folder_paths()
         folder_path_suggestions = list(dict.fromkeys(scanned_paths))
 
-    def _normalize_folder_search_value(value):
-        return " ".join(
-            (value or "").lower().replace("\\", " ").replace("/", " ").split()
-        )
-
-    def _get_filtered_folder_suggestions(query):
-        if not folder_path_suggestions:
-            return []
-
-        normalized_query = _normalize_folder_search_value(query)
-        if not normalized_query:
-            return folder_path_suggestions
-
-        prefix_matches = []
-        contains_matches = []
+        entries = []
+        label_to_path = {}
 
         for candidate_path in folder_path_suggestions:
             employee_name = os.path.basename(candidate_path)
@@ -3550,13 +3986,51 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             except ValueError:
                 relative_path = candidate_path
 
+            base_label = f"{employee_name} | {relative_path}"
+            unique_label = base_label
+            suffix = 2
+            while unique_label in label_to_path and label_to_path[unique_label] != candidate_path:
+                unique_label = f"{base_label} ({suffix})"
+                suffix += 1
+
             searchable = _normalize_folder_search_value(
                 f"{employee_name} {relative_path} {candidate_path}"
             )
+            entries.append(
+                {
+                    "label": unique_label,
+                    "path": candidate_path,
+                    "searchable": searchable,
+                }
+            )
+            label_to_path[unique_label] = candidate_path
+
+        folder_suggestion_entries = entries
+        folder_suggestion_label_to_path = label_to_path
+
+    def _normalize_folder_search_value(value):
+        return " ".join(
+            (value or "").lower().replace("\\", " ").replace("/", " ").split()
+        )
+
+    def _get_filtered_folder_suggestions(query):
+        if not folder_suggestion_entries:
+            return []
+
+        normalized_query = _normalize_folder_search_value(query)
+        if not normalized_query:
+            return [entry["label"] for entry in folder_suggestion_entries]
+
+        prefix_matches = []
+        contains_matches = []
+
+        for entry in folder_suggestion_entries:
+            searchable = entry["searchable"]
+            label = entry["label"]
             if searchable.startswith(normalized_query):
-                prefix_matches.append(candidate_path)
+                prefix_matches.append(label)
             elif normalized_query in searchable:
-                contains_matches.append(candidate_path)
+                contains_matches.append(label)
 
         return prefix_matches + contains_matches
 
@@ -3578,7 +4052,13 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
 
     def _apply_folder_input_selection(selected_value=None):
         raw_value = selected_value if selected_value is not None else folder_var.get()
-        candidate = normalize_path((raw_value or "").strip())
+        raw_value = (raw_value or "").strip()
+        candidate = folder_suggestion_label_to_path.get(raw_value, "")
+        if not candidate:
+            candidate = normalize_path(raw_value)
+        else:
+            candidate = normalize_path(candidate)
+
         if not candidate:
             return
 
@@ -3675,6 +4155,15 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             _configure_icon_button(preview_button, "preview", TOOLBAR_ICON_PREVIEW, "Preview")
             _attach_hover_tooltip(preview_button, "Preview this existing PDF")
 
+            edit_button = ttk.Button(
+                row,
+                style="ToolbarIcon.TButton",
+                command=lambda target_file=file: rename_existing_pdf(target_file),
+            )
+            edit_button.pack(side="right", padx=(0, 8))
+            _configure_icon_button(edit_button, "edit", TOOLBAR_ICON_EDIT, "Edit")
+            _attach_hover_tooltip(edit_button, "Rename this existing PDF")
+
             if display_name != file:
                 _attach_hover_tooltip(name_label, file)
 
@@ -3706,8 +4195,9 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
                 hover_widget.bind("<Enter>", _on_existing_row_enter, add="+")
                 hover_widget.bind("<Leave>", _on_existing_row_leave, add="+")
 
-            preview_button.bind("<Enter>", _on_existing_row_enter, add="+")
-            preview_button.bind("<Leave>", _on_existing_row_leave, add="+")
+            for action_button in (edit_button, preview_button):
+                action_button.bind("<Enter>", _on_existing_row_enter, add="+")
+                action_button.bind("<Leave>", _on_existing_row_leave, add="+")
 
             _set_pending_row_hover_state(row, name_label, checkbutton, False)
 
@@ -3730,7 +4220,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             name_var.set(metadata["name"])
             letter_var.set(metadata["name"][0].upper())
             new_year_var.set(metadata["latest"])
-            old_year_var.set(metadata["earliest"])
+            old_year_var.set(metadata.get("earliest", ""))
         refresh_destination_preview()
         update_merge_summary()
 
@@ -3751,16 +4241,96 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         except RuntimeError as exc:
             messagebox.showerror("Error", f"Could not open PDF: {exc}")
 
+    def rename_existing_pdf(target_filename=None):
+        filename = (target_filename or existing_selected_pdf_var.get().strip()).strip()
+        if not filename:
+            messagebox.showwarning("Warning", "Select an existing PDF to rename.", parent=win)
+            return
+
+        folder = normalize_path(folder_var.get())
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("Error", "Select a valid employee folder first.", parent=win)
+            return
+
+        source_path = normalize_path(os.path.join(folder, filename))
+        if not os.path.exists(source_path):
+            messagebox.showerror("Error", "The selected PDF no longer exists.", parent=win)
+            load_existing_pdfs()
+            return
+
+        name_root, _ext = os.path.splitext(filename)
+        proposed_name = simpledialog.askstring(
+            "Rename PDF",
+            "Enter the new filename (.pdf optional):",
+            initialvalue=name_root,
+            parent=win,
+        )
+        if proposed_name is None:
+            return
+
+        proposed_name = proposed_name.strip()
+        if not proposed_name:
+            messagebox.showerror("Invalid Filename", "PDF filename cannot be empty.", parent=win)
+            return
+
+        if not proposed_name.lower().endswith(".pdf"):
+            proposed_name = f"{proposed_name}.pdf"
+
+        try:
+            new_filename = _validate_windows_path_component(proposed_name, "PDF filename")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Filename", str(exc), parent=win)
+            return
+
+        if not new_filename.lower().endswith(".pdf"):
+            messagebox.showerror("Invalid Filename", "PDF filename must end with .pdf.", parent=win)
+            return
+
+        if new_filename == filename:
+            return
+
+        destination_path = normalize_path(os.path.join(folder, new_filename))
+        source_norm = os.path.normcase(os.path.abspath(source_path))
+        destination_norm = os.path.normcase(os.path.abspath(destination_path))
+        if source_norm != destination_norm and os.path.exists(destination_path):
+            messagebox.showerror(
+                "Error",
+                f"A file named '{new_filename}' already exists in this folder.",
+                parent=win,
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm PDF Rename",
+            f"Rename:\n{filename}\n\nto:\n{new_filename}",
+            parent=win,
+        )
+        if not confirm:
+            return
+
+        try:
+            os.rename(source_path, destination_path)
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to rename PDF: {exc}", parent=win)
+            return
+
+        existing_selected_pdf_var.set(new_filename)
+        load_existing_pdfs()
+        refresh_destination_preview()
+        update_merge_summary()
+
     def validate_years():
         latest = new_year_var.get().strip()
         earliest = old_year_var.get().strip()
-        if not (latest and earliest):
-            messagebox.showerror("Error", "Both year fields are required.")
+        try:
+            years = _normalize_record_year_inputs(latest, earliest)
+        except ValueError as exc:
+            messagebox.showerror("Error", str(exc))
             return None
-        if not (latest.isdigit() and earliest.isdigit()):
-            messagebox.showerror("Error", "Year fields must be numeric.")
+        if years is None:
+            messagebox.showerror("Error", "Enter at least one year (Latest or Oldest).")
             return None
-        return max(int(latest), int(earliest)), min(int(latest), int(earliest))
+        return years
 
     def perform_merge():
         nonlocal processed_successfully
@@ -3789,7 +4359,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         if years is None:
             return
         latest_year, earliest_year = years
-        final_filename = f"{employee_name}_{latest_year}_{earliest_year}.pdf"
+        final_filename = _build_record_filename(employee_name, latest_year, earliest_year)
         final_path = normalize_path(os.path.join(folder, final_filename))
 
         existing_path = normalize_path(os.path.join(folder, existing_filename))
@@ -3916,6 +4486,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
 
     folder_field = ttk.Combobox(folder_frame, textvariable=folder_var, state="normal")
     folder_field.pack(side="left", expand=True, fill="x", padx=(0, 8))
+    _prevent_combobox_mousewheel_value_change(folder_field)
 
     _refresh_folder_autocomplete_catalog()
 
@@ -3983,7 +4554,77 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         except RuntimeError as exc:
             messagebox.showerror("Error", f"Unable to open folder: {exc}")
 
-    ttk.Button(button_frame, text="Open Folder", command=open_folder).grid(row=0, column=1, padx=5)
+    def rename_selected_folder():
+        current_folder = normalize_path(folder_var.get().strip())
+        if not current_folder:
+            messagebox.showwarning("Warning", "Select a folder first.", parent=win)
+            return
+        if not os.path.isdir(current_folder):
+            messagebox.showerror("Error", "Selected folder does not exist.", parent=win)
+            return
+        if not ensure_folder_under_root(current_folder):
+            messagebox.showerror(
+                "Error",
+                "Selected folder must be inside the Records Root Folder.",
+                parent=win,
+            )
+            return
+
+        current_name = os.path.basename(current_folder)
+        parent_folder = normalize_path(os.path.dirname(current_folder))
+        proposed_name = simpledialog.askstring(
+            "Rename Employee Folder",
+            "Enter the corrected folder name:",
+            initialvalue=current_name,
+            parent=win,
+        )
+        if proposed_name is None:
+            return
+
+        try:
+            new_folder_name = _validate_windows_path_component(proposed_name, "Folder name")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Folder Name", str(exc), parent=win)
+            return
+
+        renamed_folder = normalize_path(os.path.join(parent_folder, new_folder_name))
+        if renamed_folder == current_folder:
+            return
+
+        current_norm = os.path.normcase(os.path.abspath(current_folder))
+        renamed_norm = os.path.normcase(os.path.abspath(renamed_folder))
+        if current_norm != renamed_norm and os.path.exists(renamed_folder):
+            messagebox.showerror(
+                "Error",
+                "A folder with that name already exists in this location.",
+                parent=win,
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Folder Rename",
+            f"Rename folder:\n{current_name}\n\nto:\n{new_folder_name}",
+            parent=win,
+        )
+        if not confirm:
+            return
+
+        try:
+            os.rename(current_folder, renamed_folder)
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to rename folder: {exc}", parent=win)
+            return
+
+        _refresh_folder_autocomplete_catalog()
+        folder_var.set(renamed_folder)
+        prefill_from_folder(renamed_folder)
+        _refresh_folder_choices()
+        load_existing_pdfs()
+        refresh_destination_preview()
+        update_merge_summary()
+
+    ttk.Button(button_frame, text="View Folder", command=open_folder).grid(row=0, column=1, padx=5)
+    ttk.Button(button_frame, text="Rename Folder", command=rename_selected_folder).grid(row=0, column=2, padx=5)
 
     # Metadata fields
     form_frame = ttk.Frame(content, padding=(0, 10))
@@ -3996,6 +4637,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         values=employee_name_suggestions,
         state="normal",
     )
+    _prevent_combobox_mousewheel_value_change(merge_name_field)
 
     def _handle_merge_name_key(event=None):
         # Keep user input untouched and only refresh/open suggestion list.
@@ -4059,31 +4701,58 @@ def _start_batch_processing(mode):
     files = selected.copy()
     total = len(files)
     action_label = "New Record" if mode == "new" else "Merge Existing"
-    processed_count = 0
+    batch_state = {
+        "files": files,
+        "total": total,
+        "current": 1,
+        "processed": 0,
+        "cancelled": False,
+        "summary_shown": False,
+    }
 
-    def launch_next(index=0):
-        nonlocal processed_count
-        if index >= total:
-            if total > 1 and processed_count > 0:
-                messagebox.showinfo(
-                    "Batch Complete",
-                    f"{action_label} batch finished. Processed {processed_count} of {total} pending PDFs.",
-                )
+    def _show_batch_summary(cancelled=False):
+        if batch_state["summary_shown"]:
             return
 
-        current_file = files[index]
+        if not cancelled and batch_state["total"] <= 1:
+            batch_state["summary_shown"] = True
+            return
+
+        batch_state["summary_shown"] = True
+
+        processed_count = batch_state["processed"]
+        skipped_count = max(0, batch_state["total"] - processed_count)
+        title = "Batch Cancelled" if cancelled else "Batch Complete"
+        message = f"{action_label} batch finished. Processed {processed_count} of {batch_state['total']} pending PDFs."
+        if skipped_count > 0:
+            message += f" Skipped {skipped_count}."
+        messagebox.showinfo(title, message)
+
+    def launch_next():
+        if batch_state["cancelled"]:
+            _show_batch_summary(cancelled=True)
+            return
+
+        if not batch_state["files"]:
+            _show_batch_summary(cancelled=False)
+            return
+
+        current_file = batch_state["files"][0]
+        batch_state["current"] = batch_state["total"] - len(batch_state["files"]) + 1
 
         def handle_close(_success, _filename):
-            nonlocal processed_count
             if _success:
-                processed_count += 1
-            root.after(150, lambda: launch_next(index + 1))
+                batch_state["processed"] += 1
 
-        batch_context = {"current": index + 1, "total": total}
+            if _filename in batch_state["files"]:
+                batch_state["files"].remove(_filename)
+
+            root.after(150, launch_next)
+
         if mode == "new":
-            new_record_window(initial_filename=current_file, batch_context=batch_context, on_complete=handle_close)
+            new_record_window(initial_filename=current_file, batch_context=batch_state, on_complete=handle_close)
         else:
-            merge_existing_window(pending_filename=current_file, batch_context=batch_context, on_complete=handle_close)
+            merge_existing_window(pending_filename=current_file, batch_context=batch_state, on_complete=handle_close)
 
     launch_next()
 
@@ -4094,6 +4763,1151 @@ def start_new_record_batch():
 
 def start_merge_existing_batch():
     _start_batch_processing("merge")
+
+
+def employee_details_editor_window():
+    root_path = normalize_path(root_folder.get().strip())
+    if not root_path:
+        messagebox.showerror("Error", "Select the Records Root Folder first.")
+        return
+    if not os.path.isdir(root_path):
+        messagebox.showerror("Error", "The selected Records Root Folder does not exist.")
+        return
+
+    win = tk.Toplevel(root)
+    _apply_app_icon(win)
+    win.title("Employee Details Editor")
+    configure_window_geometry(
+        win,
+        900,
+        760,
+        min_width=720,
+        min_height=560,
+        margin_x=DEFAULT_MARGIN_X,
+        margin_y=DEFAULT_MARGIN_Y,
+    )
+    win.transient(root)
+    win.lift()
+    win.focus_force()
+    apply_theme(win)
+
+    folder_var = tk.StringVar()
+    employee_name_var = tk.StringVar(value="")
+    current_status_var = tk.StringVar(value="Unknown")
+    target_status_var = tk.StringVar(value="Active")
+    folder_name_var = tk.StringVar()
+
+    files_count_var = tk.StringVar(value="PDF files: 0")
+    selected_file_var = tk.StringVar(value="No PDF selected")
+    file_name_var = tk.StringVar()
+    created_var = tk.StringVar()
+    modified_var = tk.StringVar()
+
+    status_values = []
+    folder_path_suggestions = []
+    folder_suggestion_entries = []
+    folder_suggestion_label_to_path = {}
+
+    def ensure_folder_under_root(chosen_folder):
+        chosen_folder = normalize_path(chosen_folder)
+        try:
+            common = os.path.commonpath([os.path.abspath(chosen_folder), os.path.abspath(root_path)])
+        except ValueError:
+            return False
+        return common == os.path.abspath(root_path)
+
+    def _build_employee_folder_path(status_value, employee_name):
+        status_name = str(status_value or "").strip()
+        name = str(employee_name or "").strip()
+        if not status_name or not name:
+            return ""
+        first_char = name[0].upper() if name else "#"
+        letter_folder = first_char if first_char.isalpha() else "#"
+        return normalize_path(os.path.join(root_path, status_name, letter_folder, name))
+
+    def _normalize_folder_search_value(value):
+        return " ".join((value or "").lower().replace("\\", " ").replace("/", " ").split())
+
+    def _scan_employee_folder_paths():
+        discovered = []
+        try:
+            status_entries = sorted(os.listdir(root_path))
+        except OSError:
+            return discovered
+
+        for status_name in status_entries:
+            status_path = normalize_path(os.path.join(root_path, status_name))
+            if not os.path.isdir(status_path):
+                continue
+
+            try:
+                letter_entries = sorted(os.listdir(status_path))
+            except OSError:
+                continue
+
+            for letter_name in letter_entries:
+                letter_path = normalize_path(os.path.join(status_path, letter_name))
+                if not os.path.isdir(letter_path):
+                    continue
+
+                try:
+                    employee_entries = sorted(os.listdir(letter_path))
+                except OSError:
+                    continue
+
+                for employee_name in employee_entries:
+                    employee_path = normalize_path(os.path.join(letter_path, employee_name))
+                    if os.path.isdir(employee_path):
+                        discovered.append(employee_path)
+
+        return discovered
+
+    def _refresh_folder_autocomplete_catalog():
+        nonlocal folder_path_suggestions, folder_suggestion_entries, folder_suggestion_label_to_path
+
+        scanned_paths = _scan_employee_folder_paths()
+        folder_path_suggestions = list(dict.fromkeys(scanned_paths))
+
+        entries = []
+        label_to_path = {}
+
+        for candidate_path in folder_path_suggestions:
+            employee_name = os.path.basename(candidate_path)
+            try:
+                relative_path = os.path.relpath(candidate_path, root_path)
+            except ValueError:
+                relative_path = candidate_path
+
+            base_label = f"{employee_name} | {relative_path}"
+            unique_label = base_label
+            suffix = 2
+            while unique_label in label_to_path and label_to_path[unique_label] != candidate_path:
+                unique_label = f"{base_label} ({suffix})"
+                suffix += 1
+
+            searchable = _normalize_folder_search_value(
+                f"{employee_name} {relative_path} {candidate_path}"
+            )
+            entries.append(
+                {
+                    "label": unique_label,
+                    "path": candidate_path,
+                    "searchable": searchable,
+                }
+            )
+            label_to_path[unique_label] = candidate_path
+
+        folder_suggestion_entries = entries
+        folder_suggestion_label_to_path = label_to_path
+
+    def _get_filtered_folder_suggestions(query):
+        if not folder_suggestion_entries:
+            return []
+
+        normalized_query = _normalize_folder_search_value(query)
+        if not normalized_query:
+            return [entry["label"] for entry in folder_suggestion_entries]
+
+        prefix_matches = []
+        contains_matches = []
+
+        for entry in folder_suggestion_entries:
+            searchable = entry["searchable"]
+            label = entry["label"]
+            if searchable.startswith(normalized_query):
+                prefix_matches.append(label)
+            elif normalized_query in searchable:
+                contains_matches.append(label)
+
+        return prefix_matches + contains_matches
+
+    def _update_folder_combobox_suggestions(combobox, query_text, event=None):
+        suggestions = _get_filtered_folder_suggestions(query_text)
+        combobox["values"] = suggestions
+
+        keysym = getattr(event, "keysym", "") if event is not None else ""
+        navigation_keys = {"Up", "Down", "Prior", "Next", "Return", "Tab", "Escape"}
+        if keysym in navigation_keys:
+            if keysym in {"Return", "Tab", "Escape"}:
+                _hide_suggestion_popup(combobox)
+            return
+
+        if query_text.strip() and suggestions:
+            combobox.after_idle(lambda: _show_suggestion_popup(combobox, suggestions))
+        else:
+            combobox.after_idle(lambda: _hide_suggestion_popup(combobox))
+
+    def _resolve_folder_input_value(raw_value):
+        raw = str(raw_value or "").strip()
+        candidate = folder_suggestion_label_to_path.get(raw, "")
+        if not candidate:
+            candidate = normalize_path(raw)
+        else:
+            candidate = normalize_path(candidate)
+
+        if not candidate:
+            return ""
+
+        if not os.path.isabs(candidate):
+            candidate = normalize_path(os.path.join(root_path, candidate))
+
+        return candidate
+
+    def _refresh_status_choices():
+        nonlocal status_values
+        discovered = ["Active", "Retiree"]
+        try:
+            entries = sorted(os.listdir(root_path))
+        except OSError:
+            entries = []
+
+        for entry in entries:
+            candidate = normalize_path(os.path.join(root_path, entry))
+            if os.path.isdir(candidate) and entry not in discovered:
+                discovered.append(entry)
+
+        status_values = discovered
+        status_field["values"] = status_values
+
+        current_target = target_status_var.get().strip()
+        if current_target not in status_values:
+            target_status_var.set(status_values[0])
+
+    def _clear_file_editor_fields():
+        selected_file_var.set("No PDF selected")
+        file_name_var.set("")
+        created_var.set("")
+        modified_var.set("")
+
+    def _get_selected_file_name():
+        selection = files_listbox.curselection()
+        if not selection:
+            return ""
+        return files_listbox.get(selection[0]).strip()
+
+    def _refresh_selected_file_details():
+        selected_name = _get_selected_file_name()
+        if not selected_name:
+            _clear_file_editor_fields()
+            return
+
+        folder = normalize_path(folder_var.get().strip())
+        file_path = normalize_path(os.path.join(folder, selected_name))
+        if not os.path.exists(file_path):
+            _clear_file_editor_fields()
+            return
+
+        selected_file_var.set(selected_name)
+        file_name_var.set(os.path.splitext(selected_name)[0])
+        created_var.set(_format_editor_datetime(datetime.fromtimestamp(os.path.getctime(file_path))))
+        modified_var.set(_format_editor_datetime(datetime.fromtimestamp(os.path.getmtime(file_path))))
+
+    def _refresh_files_list(preferred_name=""):
+        current_name = preferred_name or _get_selected_file_name()
+        files_listbox.delete(0, tk.END)
+
+        folder = normalize_path(folder_var.get().strip())
+        if not folder or not os.path.isdir(folder):
+            files_count_var.set("PDF files: 0")
+            _clear_file_editor_fields()
+            return
+
+        try:
+            pdf_files = sorted(
+                filename for filename in os.listdir(folder) if filename.lower().endswith(".pdf")
+            )
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to load PDFs: {exc}", parent=win)
+            files_count_var.set("PDF files: 0")
+            _clear_file_editor_fields()
+            return
+
+        for filename in pdf_files:
+            files_listbox.insert(tk.END, filename)
+
+        files_count_var.set(f"PDF files: {len(pdf_files)}")
+
+        if not pdf_files:
+            _clear_file_editor_fields()
+            return
+
+        target_name = current_name if current_name in pdf_files else pdf_files[0]
+        target_index = pdf_files.index(target_name)
+        files_listbox.selection_clear(0, tk.END)
+        files_listbox.selection_set(target_index)
+        files_listbox.activate(target_index)
+        files_listbox.see(target_index)
+        _refresh_selected_file_details()
+
+    def _load_employee_folder_details(target_folder=None, show_errors=True):
+        source_value = target_folder if target_folder is not None else folder_var.get()
+        folder = _resolve_folder_input_value(source_value)
+        if not folder:
+            if show_errors:
+                messagebox.showwarning("Warning", "Select an employee folder first.", parent=win)
+            return
+        if not os.path.isdir(folder):
+            if show_errors:
+                messagebox.showerror("Error", "The selected folder does not exist.", parent=win)
+            return
+        if not ensure_folder_under_root(folder):
+            if show_errors:
+                messagebox.showerror(
+                    "Error",
+                    "Please choose a folder inside the Records Root Folder.",
+                    parent=win,
+                )
+            return
+
+        folder_var.set(folder)
+
+        employee_name = os.path.basename(folder)
+        employee_name_var.set(employee_name)
+        folder_name_var.set(employee_name)
+
+        try:
+            relative = os.path.relpath(folder, root_path)
+            parts = relative.split(os.sep)
+        except ValueError:
+            parts = []
+
+        detected_status = parts[0] if parts else ""
+        current_status_var.set(detected_status or "Unknown")
+
+        if detected_status and detected_status in status_values:
+            target_status_var.set(detected_status)
+
+        _refresh_files_list()
+
+    def _apply_folder_input_selection(selected_value=None):
+        source_value = selected_value if selected_value is not None else folder_var.get()
+        folder = _resolve_folder_input_value(source_value)
+        if not folder or not os.path.isdir(folder):
+            return
+        if not ensure_folder_under_root(folder):
+            return
+        _load_employee_folder_details(folder, show_errors=False)
+
+    def _browse_employee_folder():
+        chosen = filedialog.askdirectory(initialdir=root_path)
+        if not chosen:
+            return
+        _refresh_folder_autocomplete_catalog()
+        _load_employee_folder_details(chosen, show_errors=True)
+
+    def _open_selected_folder():
+        folder = normalize_path(folder_var.get().strip())
+        if not folder:
+            messagebox.showwarning("Warning", "Select an employee folder first.", parent=win)
+            return
+        try:
+            _launch_path(folder)
+        except RuntimeError as exc:
+            messagebox.showerror("Error", f"Unable to open folder: {exc}", parent=win)
+
+    def _rename_employee_folder():
+        current_folder = normalize_path(folder_var.get().strip())
+        if not current_folder or not os.path.isdir(current_folder):
+            messagebox.showerror("Error", "Select a valid employee folder first.", parent=win)
+            return
+
+        try:
+            new_folder_name = _validate_filesystem_component_name(folder_name_var.get(), "Folder name")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Folder Name", str(exc), parent=win)
+            return
+
+        current_status = current_status_var.get().strip()
+        target_status = current_status if current_status and current_status != "Unknown" else target_status_var.get().strip()
+        destination_folder = _build_employee_folder_path(target_status, new_folder_name)
+        if not destination_folder:
+            messagebox.showerror("Error", "Unable to build destination folder path.", parent=win)
+            return
+
+        if os.path.normcase(os.path.abspath(destination_folder)) == os.path.normcase(os.path.abspath(current_folder)):
+            return
+
+        if os.path.exists(destination_folder):
+            messagebox.showerror(
+                "Error",
+                "A folder with that employee name already exists in the destination.",
+                parent=win,
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Folder Rename",
+            f"Rename employee folder to:\n{new_folder_name}\n\nDestination:\n{destination_folder}",
+            parent=win,
+        )
+        if not confirm:
+            return
+
+        try:
+            os.makedirs(os.path.dirname(destination_folder), exist_ok=True)
+            os.rename(current_folder, destination_folder)
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to rename employee folder: {exc}", parent=win)
+            return
+
+        _refresh_status_choices()
+        _refresh_folder_autocomplete_catalog()
+        _load_employee_folder_details(destination_folder, show_errors=False)
+        messagebox.showinfo(
+            "Success",
+            f"Employee folder renamed successfully to:\n{new_folder_name}",
+            parent=win,
+        )
+
+    def _apply_status_change():
+        current_folder = normalize_path(folder_var.get().strip())
+        if not current_folder or not os.path.isdir(current_folder):
+            messagebox.showerror("Error", "Select a valid employee folder first.", parent=win)
+            return
+
+        new_status = target_status_var.get().strip()
+        if not new_status:
+            messagebox.showerror("Error", "Select a target status.", parent=win)
+            return
+
+        employee_name = os.path.basename(current_folder)
+        destination_folder = _build_employee_folder_path(new_status, employee_name)
+        if not destination_folder:
+            messagebox.showerror("Error", "Unable to build destination folder path.", parent=win)
+            return
+
+        if os.path.normcase(os.path.abspath(destination_folder)) == os.path.normcase(os.path.abspath(current_folder)):
+            return
+
+        if os.path.exists(destination_folder):
+            messagebox.showerror(
+                "Error",
+                "An employee folder with this status and name already exists.",
+                parent=win,
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Status Change",
+            f"Move employee to status '{new_status}'?\n\nDestination:\n{destination_folder}",
+            parent=win,
+        )
+        if not confirm:
+            return
+
+        try:
+            os.makedirs(os.path.dirname(destination_folder), exist_ok=True)
+            os.rename(current_folder, destination_folder)
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to change employee status: {exc}", parent=win)
+            return
+
+        _refresh_status_choices()
+        _refresh_folder_autocomplete_catalog()
+        _load_employee_folder_details(destination_folder, show_errors=False)
+        messagebox.showinfo(
+            "Success",
+            f"Employee status updated to '{new_status}'.",
+            parent=win,
+        )
+
+    def _rename_selected_pdf():
+        folder = normalize_path(folder_var.get().strip())
+        filename = _get_selected_file_name()
+        if not folder or not filename:
+            messagebox.showwarning("Warning", "Select a PDF file first.", parent=win)
+            return
+
+        new_name_input = file_name_var.get().strip()
+        if not new_name_input:
+            messagebox.showerror("Error", "File name cannot be empty.", parent=win)
+            return
+
+        if not new_name_input.lower().endswith(".pdf"):
+            new_name_input = f"{new_name_input}.pdf"
+
+        try:
+            new_filename = _validate_filesystem_component_name(new_name_input, "PDF filename")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Filename", str(exc), parent=win)
+            return
+
+        if not new_filename.lower().endswith(".pdf"):
+            messagebox.showerror("Invalid Filename", "PDF filename must end with .pdf.", parent=win)
+            return
+
+        source_path = normalize_path(os.path.join(folder, filename))
+        destination_path = normalize_path(os.path.join(folder, new_filename))
+
+        if os.path.normcase(os.path.abspath(source_path)) == os.path.normcase(os.path.abspath(destination_path)):
+            return
+
+        if os.path.exists(destination_path):
+            messagebox.showerror(
+                "Error",
+                f"A PDF named '{new_filename}' already exists in this folder.",
+                parent=win,
+            )
+            return
+
+        try:
+            os.rename(source_path, destination_path)
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to rename PDF: {exc}", parent=win)
+            return
+
+        _refresh_files_list(preferred_name=new_filename)
+        messagebox.showinfo(
+            "Success",
+            f"PDF renamed successfully to:\n{new_filename}",
+            parent=win,
+        )
+
+    def _apply_selected_pdf_timestamps():
+        folder = normalize_path(folder_var.get().strip())
+        filename = _get_selected_file_name()
+        if not folder or not filename:
+            messagebox.showwarning("Warning", "Select a PDF file first.", parent=win)
+            return
+
+        file_path = normalize_path(os.path.join(folder, filename))
+        if not os.path.exists(file_path):
+            messagebox.showerror("Error", "The selected PDF no longer exists.", parent=win)
+            _refresh_files_list()
+            return
+
+        try:
+            created_dt = _parse_editor_datetime_input(created_var.get(), "Created date")
+            modified_dt = _parse_editor_datetime_input(modified_var.get(), "Modified date")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Date", str(exc), parent=win)
+            return
+
+        try:
+            _set_file_creation_and_modified_time(file_path, created_dt, modified_dt)
+        except OSError as exc:
+            messagebox.showerror("Error", f"Unable to update file dates: {exc}", parent=win)
+            return
+
+        _refresh_selected_file_details()
+        messagebox.showinfo(
+            "Success",
+            f"File dates updated successfully for:\n{filename}",
+            parent=win,
+        )
+
+    def _parse_bulk_pdf_paths(raw_text):
+        parsed_paths = []
+        seen_paths = set()
+
+        for raw_line in str(raw_text or "").replace("\r", "\n").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            raw_candidates = []
+
+            if '"' in line:
+                raw_candidates.extend(re.findall(r'"([^"]+)"', line))
+                line = re.sub(r'"[^"]+"', ' ', line)
+
+            if "'" in line:
+                raw_candidates.extend(re.findall(r"'([^']+)'", line))
+                line = re.sub(r"'[^']+'", ' ', line)
+
+            for chunk in re.split(r";|\t", line):
+                chunk = chunk.strip()
+                if chunk:
+                    raw_candidates.append(chunk)
+
+            for candidate in raw_candidates:
+                normalized_candidate = str(candidate or "").strip().strip('"').strip("'").strip()
+                if not normalized_candidate:
+                    continue
+
+                candidate_path = normalize_path(normalized_candidate)
+                if not os.path.isabs(candidate_path):
+                    candidate_path = normalize_path(os.path.join(root_path, candidate_path))
+
+                normalized_key = os.path.normcase(os.path.abspath(candidate_path))
+                if normalized_key in seen_paths:
+                    continue
+
+                seen_paths.add(normalized_key)
+                parsed_paths.append(candidate_path)
+
+        return parsed_paths
+
+    def _apply_bulk_pdf_timestamps(
+        raw_paths_text=None,
+        parent_window=None,
+        created_text=None,
+        modified_text=None,
+    ):
+        dialog_parent = parent_window if parent_window is not None else win
+        if raw_paths_text is None:
+            raw_paths_text = ""
+
+        file_paths = _parse_bulk_pdf_paths(raw_paths_text)
+        if not file_paths:
+            messagebox.showwarning(
+                "Warning",
+                "Paste at least one PDF path first (quoted paths are supported).",
+                parent=dialog_parent,
+            )
+            return
+
+        created_input = created_var.get() if created_text is None else created_text
+        modified_input = modified_var.get() if modified_text is None else modified_text
+
+        try:
+            created_dt = _parse_editor_datetime_input(created_input, "Created date")
+            modified_dt = _parse_editor_datetime_input(modified_input, "Modified date")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Date", str(exc), parent=dialog_parent)
+            return
+
+        updated_count = 0
+        failed_items = []
+
+        for path in file_paths:
+            if not path.lower().endswith(".pdf"):
+                failed_items.append(f"{path} (not a PDF)")
+                continue
+            if not os.path.exists(path):
+                failed_items.append(f"{path} (not found)")
+                continue
+
+            try:
+                _set_file_creation_and_modified_time(path, created_dt, modified_dt)
+                updated_count += 1
+            except OSError as exc:
+                failed_items.append(f"{path} ({exc})")
+
+        _refresh_selected_file_details()
+
+        if updated_count > 0 and not failed_items:
+            messagebox.showinfo(
+                "Success",
+                f"Updated dates for {updated_count} PDF file(s).",
+                parent=dialog_parent,
+            )
+            return
+
+        if updated_count > 0:
+            details = "\n".join(failed_items[:5])
+            if len(failed_items) > 5:
+                details += "\n..."
+            messagebox.showwarning(
+                "Partial Success",
+                f"Updated dates for {updated_count} PDF file(s).\n"
+                f"Failed: {len(failed_items)}\n\n{details}",
+                parent=dialog_parent,
+            )
+            return
+
+        details = "\n".join(failed_items[:8])
+        if len(failed_items) > 8:
+            details += "\n..."
+        messagebox.showerror(
+            "Error",
+            "No PDF file dates were updated.\n\n" + details,
+            parent=dialog_parent,
+        )
+
+    def _open_bulk_date_editor_window():
+        bulk_win = tk.Toplevel(win)
+        _apply_app_icon(bulk_win)
+        bulk_win.title("Bulk PDF Date Update")
+        configure_window_geometry(
+            bulk_win,
+            760,
+            520,
+            min_width=620,
+            min_height=420,
+            margin_x=DEFAULT_MARGIN_X,
+            margin_y=DEFAULT_MARGIN_Y,
+        )
+        bulk_win.transient(win)
+        bulk_win.lift()
+        bulk_win.focus_force()
+        apply_theme(bulk_win)
+
+        now_text = _format_editor_datetime(datetime.now())
+        popup_created_var = tk.StringVar(value=created_var.get().strip() or now_text)
+        popup_modified_var = tk.StringVar(value=modified_var.get().strip() or now_text)
+
+        bulk_content = ttk.Frame(bulk_win, padding=14, style="TFrame")
+        bulk_content.pack(fill="both", expand=True)
+
+        ttk.Label(
+            bulk_content,
+            text="Bulk Date Update by PDF Paths",
+            style="Card.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            bulk_content,
+            text=(
+                "Edit Created and Modified date/time below, then paste one path per line. "
+                "Quoted paths are accepted."
+            ),
+            style="Subheading.TLabel",
+            wraplength=700,
+            justify="left",
+        ).pack(anchor="w", pady=(4, 8))
+
+        ttk.Label(bulk_content, text="Created Date:").pack(anchor="w")
+        ttk.Entry(bulk_content, textvariable=popup_created_var).pack(fill="x")
+
+        ttk.Label(bulk_content, text="Modified Date:").pack(anchor="w", pady=(8, 0))
+        ttk.Entry(bulk_content, textvariable=popup_modified_var).pack(fill="x")
+
+        ttk.Label(
+            bulk_content,
+            text="Date format: YYYY-MM-DD HH:MM[:SS]",
+            style="Subheading.TLabel",
+        ).pack(anchor="w", pady=(6, 8))
+
+        bulk_paths_container = ttk.Frame(bulk_content, style="Card.TFrame")
+        bulk_paths_container.pack(fill="both", expand=True)
+
+        bulk_paths_scrollbar = ttk.Scrollbar(bulk_paths_container, orient="vertical")
+        bulk_paths_scrollbar.pack(side="right", fill="y")
+
+        popup_bulk_paths_text = tk.Text(
+            bulk_paths_container,
+            height=12,
+            wrap="none",
+            yscrollcommand=bulk_paths_scrollbar.set,
+        )
+        popup_bulk_paths_text.configure(
+            bg=LISTBOX_BG,
+            fg=LISTBOX_TEXT,
+            insertbackground=TEXT_COLOR,
+            selectbackground=ACCENT_COLOR,
+            selectforeground="white",
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=LISTBOX_BORDER,
+            highlightcolor=ACCENT_COLOR,
+            font=("Segoe UI", 9),
+            padx=6,
+            pady=6,
+        )
+        popup_bulk_paths_text.pack(side="left", fill="both", expand=True)
+        bulk_paths_scrollbar.configure(command=popup_bulk_paths_text.yview)
+        _mark_widget_as_scroll_list(popup_bulk_paths_text)
+
+        bulk_actions = ttk.Frame(bulk_content, style="TFrame")
+        bulk_actions.pack(fill="x", pady=(10, 0))
+
+        ttk.Button(
+            bulk_actions,
+            text="Apply Dates to Listed Paths",
+            style="Accent.TButton",
+            command=lambda: _apply_bulk_pdf_timestamps(
+                raw_paths_text=popup_bulk_paths_text.get("1.0", tk.END),
+                parent_window=bulk_win,
+                created_text=popup_created_var.get(),
+                modified_text=popup_modified_var.get(),
+            ),
+        ).pack(side="left")
+        ttk.Button(bulk_actions, text="Close", command=bulk_win.destroy).pack(side="right")
+
+    def _preview_selected_pdf():
+        folder = normalize_path(folder_var.get().strip())
+        filename = _get_selected_file_name()
+        if not folder or not filename:
+            messagebox.showwarning("Warning", "Select a PDF file first.", parent=win)
+            return
+
+        target_path = normalize_path(os.path.join(folder, filename))
+        try:
+            _launch_path(target_path)
+        except RuntimeError as exc:
+            messagebox.showerror("Error", f"Could not open PDF: {exc}", parent=win)
+
+    content_container, content = create_scrollable_panel(win)
+    content_container.pack(fill="both", expand=True)
+    content.configure(style="TFrame", padding=16)
+
+    ttk.Label(content, text="Employee Details Editor", style="Card.TLabel").pack(anchor="w")
+    ttk.Label(
+        content,
+        text=(
+            "Use this tool to correct employee folder names, move employee status, "
+            "rename PDFs, and edit PDF creation/modified dates."
+        ),
+        style="Subheading.TLabel",
+        wraplength=840,
+        justify="left",
+    ).pack(anchor="w", pady=(2, 10))
+
+    folder_card = ttk.Frame(content, style="Card.TFrame", padding=12)
+    folder_card.pack(fill="x", pady=(0, 12))
+
+    ttk.Label(folder_card, text="Employee Folder", style="Card.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+    folder_field = ttk.Combobox(folder_card, textvariable=folder_var, state="normal")
+    folder_field.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0), padx=(0, 8))
+    _prevent_combobox_mousewheel_value_change(folder_field)
+    ttk.Button(folder_card, text="Browse", command=_browse_employee_folder).grid(row=1, column=2, pady=(6, 0), padx=(0, 8))
+    ttk.Button(folder_card, text="Load", command=_load_employee_folder_details).grid(row=1, column=3, pady=(6, 0))
+
+    ttk.Label(folder_card, text="Employee Name:").grid(row=2, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(folder_card, textvariable=employee_name_var, style="Subheading.TLabel").grid(row=2, column=1, sticky="w", pady=(10, 0))
+    ttk.Button(folder_card, text="Open Folder", command=_open_selected_folder).grid(row=2, column=3, sticky="e", pady=(10, 0))
+
+    ttk.Label(folder_card, text="Folder Name:").grid(row=3, column=0, sticky="w", pady=(10, 0))
+    folder_name_field = ttk.Combobox(folder_card, textvariable=folder_name_var, state="normal")
+    folder_name_field.grid(row=3, column=1, sticky="ew", pady=(10, 0), padx=(0, 8))
+    _prevent_combobox_mousewheel_value_change(folder_name_field)
+    ttk.Button(folder_card, text="Rename Folder", command=_rename_employee_folder).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(10, 0))
+
+    ttk.Label(folder_card, text="Current Status:").grid(row=4, column=0, sticky="w", pady=(10, 0))
+    ttk.Label(folder_card, textvariable=current_status_var, style="Subheading.TLabel").grid(row=4, column=1, sticky="w", pady=(10, 0))
+
+    ttk.Label(folder_card, text="Target Status:").grid(row=5, column=0, sticky="w", pady=(10, 0))
+    status_field = ttk.Combobox(folder_card, textvariable=target_status_var, state="readonly")
+    status_field.grid(row=5, column=1, sticky="ew", pady=(10, 0), padx=(0, 8))
+    _prevent_combobox_mousewheel_value_change(status_field)
+    ttk.Button(folder_card, text="Apply Status", command=_apply_status_change).grid(row=5, column=2, columnspan=2, sticky="ew", pady=(10, 0))
+
+    def _handle_folder_key(event=None):
+        _update_folder_combobox_suggestions(folder_field, folder_var.get(), event)
+
+    def _handle_folder_name_key(event=None):
+        _update_combobox_suggestions(folder_name_field, folder_name_var.get(), event)
+
+    def _refresh_folder_choices():
+        folder_field["values"] = _get_filtered_folder_suggestions(folder_var.get())
+
+    def _refresh_folder_name_choices():
+        folder_name_field["values"] = get_filtered_name_suggestions(folder_name_var.get())
+
+    folder_field.bind("<KeyRelease>", _handle_folder_key)
+    folder_field.bind("<<ComboboxSelected>>", lambda _event: _apply_folder_input_selection())
+    folder_field.bind("<Return>", lambda _event: (_apply_folder_input_selection(), "break")[1])
+    folder_field.bind("<FocusOut>", lambda _event: _apply_folder_input_selection(), add="+")
+    folder_field.configure(postcommand=_refresh_folder_choices)
+    setattr(
+        folder_field,
+        "_on_suggestion_selected",
+        lambda selected_value: _apply_folder_input_selection(selected_value),
+    )
+
+    folder_name_field.bind("<KeyRelease>", _handle_folder_name_key)
+    folder_name_field.configure(postcommand=_refresh_folder_name_choices)
+
+    folder_card.columnconfigure(0, weight=0)
+    folder_card.columnconfigure(1, weight=1)
+    folder_card.columnconfigure(2, weight=0)
+    folder_card.columnconfigure(3, weight=0)
+
+    files_card = ttk.Frame(content, style="Card.TFrame", padding=12)
+    files_card.pack(fill="both", expand=True)
+
+    ttk.Label(files_card, textvariable=files_count_var, style="Card.TLabel").pack(anchor="w")
+
+    files_area = ttk.Frame(files_card, style="Card.TFrame")
+    files_area.pack(fill="both", expand=True, pady=(8, 0))
+
+    list_area = ttk.Frame(files_area, style="Card.TFrame")
+    list_area.pack(side="left", fill="both", expand=True, padx=(0, 12))
+
+    files_scrollbar = ttk.Scrollbar(list_area, orient="vertical")
+    files_scrollbar.pack(side="right", fill="y")
+
+    files_listbox = tk.Listbox(list_area, yscrollcommand=files_scrollbar.set)
+    _apply_modern_listbox_style(files_listbox, compact=True, export_selection=False)
+    files_listbox.pack(side="left", fill="both", expand=True)
+    files_scrollbar.configure(command=files_listbox.yview)
+    _mark_widget_as_scroll_list(files_listbox)
+
+    editor_area = ttk.Frame(files_area, style="Card.TFrame")
+    editor_area.pack(side="right", fill="both", expand=True)
+
+    ttk.Label(editor_area, textvariable=selected_file_var, style="Subheading.TLabel", wraplength=360).pack(anchor="w")
+
+    ttk.Label(editor_area, text="File Name:").pack(anchor="w", pady=(10, 0))
+    ttk.Entry(editor_area, textvariable=file_name_var).pack(fill="x")
+
+    file_actions = ttk.Frame(editor_area, style="Card.TFrame")
+    file_actions.pack(fill="x", pady=(8, 0))
+    ttk.Button(file_actions, text="Rename File", command=_rename_selected_pdf).pack(side="left")
+    ttk.Button(file_actions, text="Preview", command=_preview_selected_pdf).pack(side="left", padx=(8, 0))
+    ttk.Button(file_actions, text="Bulk Date Update", command=_open_bulk_date_editor_window).pack(side="left", padx=(8, 0))
+
+    ttk.Separator(editor_area, orient="horizontal").pack(fill="x", pady=12)
+
+    ttk.Label(editor_area, text="Created Date:").pack(anchor="w")
+    ttk.Entry(editor_area, textvariable=created_var).pack(fill="x")
+
+    ttk.Label(editor_area, text="Modified Date:").pack(anchor="w", pady=(10, 0))
+    ttk.Entry(editor_area, textvariable=modified_var).pack(fill="x")
+
+    ttk.Label(
+        editor_area,
+        text="Date format: YYYY-MM-DD HH:MM[:SS]",
+        style="Subheading.TLabel",
+    ).pack(anchor="w", pady=(6, 0))
+
+    ttk.Button(
+        editor_area,
+        text="Apply File Dates",
+        command=_apply_selected_pdf_timestamps,
+        style="Accent.TButton",
+    ).pack(anchor="w", pady=(12, 0))
+
+    bottom_actions = ttk.Frame(content, style="TFrame")
+    bottom_actions.pack(fill="x", pady=(12, 0))
+    ttk.Button(bottom_actions, text="Close", command=win.destroy).pack(side="right")
+
+    files_listbox.bind("<<ListboxSelect>>", lambda _event=None: _refresh_selected_file_details())
+
+    _refresh_status_choices()
+    _refresh_folder_autocomplete_catalog()
+    _refresh_folder_choices()
+
+
+def show_selected_batch_files_window(
+    batch_files=None,
+    current_filename="",
+    parent_window=None,
+    batch_context=None,
+    cancel_batch_callback=None,
+):
+    if batch_context is not None and isinstance(batch_context.get("files"), list):
+        selected_files = batch_context["files"]
+    else:
+        selected_files = [
+            str(name).strip()
+            for name in (list(batch_files) if batch_files is not None else get_selected_pending_files())
+            if str(name).strip()
+        ]
+
+    owner = parent_window if (parent_window is not None and parent_window.winfo_exists()) else root
+    restore_parent_grab = False
+    if parent_window is not None and parent_window.winfo_exists():
+        try:
+            if parent_window.grab_current() is parent_window:
+                parent_window.grab_release()
+                restore_parent_grab = True
+        except tk.TclError:
+            pass
+
+    win = tk.Toplevel(owner)
+    _apply_app_icon(win)
+    win.title("Selected Batch Files")
+    configure_window_geometry(
+        win,
+        560,
+        620,
+        min_width=420,
+        min_height=360,
+        margin_x=DEFAULT_MARGIN_X,
+        margin_y=DEFAULT_MARGIN_Y,
+    )
+    win.transient(owner)
+    win.lift()
+    win.focus_force()
+    win.grab_set()
+    apply_theme(win)
+
+    def _close_batch_window():
+        try:
+            if win.grab_current() is win:
+                win.grab_release()
+        except tk.TclError:
+            pass
+
+        if win.winfo_exists():
+            win.destroy()
+
+        if restore_parent_grab and parent_window is not None and parent_window.winfo_exists():
+            try:
+                parent_window.grab_set()
+                parent_window.lift()
+                parent_window.focus_force()
+            except tk.TclError:
+                pass
+
+    win.protocol("WM_DELETE_WINDOW", _close_batch_window)
+
+    content = ttk.Frame(win, padding=16, style="TFrame")
+    content.pack(fill="both", expand=True)
+
+    count_text_var = tk.StringVar(value="Selected for batch: 0 files")
+
+    ttk.Label(
+        content,
+        textvariable=count_text_var,
+        style="Card.TLabel",
+    ).pack(anchor="w", pady=(0, 10))
+
+    empty_hint_label = ttk.Label(
+        content,
+        text="No pending files are selected. Use the checkboxes in Pending Files first.",
+        style="Subheading.TLabel",
+        justify="left",
+        wraplength=500,
+    )
+
+    if current_filename:
+        ttk.Label(
+            content,
+            text=f"Current in progress: {current_filename}",
+            style="Subheading.TLabel",
+            justify="left",
+            wraplength=500,
+        ).pack(anchor="w", pady=(0, 8))
+
+    list_container = ttk.Frame(content, style="Card.TFrame", padding=8)
+    list_container.pack(fill="both", expand=True)
+
+    files_scrollbar = ttk.Scrollbar(list_container, orient="vertical")
+    files_scrollbar.pack(side="right", fill="y")
+
+    files_listbox = tk.Listbox(
+        list_container,
+        selectmode="extended",
+        yscrollcommand=files_scrollbar.set,
+    )
+    _apply_modern_listbox_style(files_listbox, compact=True, export_selection=False)
+    files_listbox.pack(side="left", fill="both", expand=True)
+    files_scrollbar.configure(command=files_listbox.yview)
+
+    actions = ttk.Frame(content, style="TFrame")
+    actions.pack(fill="x", pady=(12, 0))
+
+    preview_button = ttk.Button(actions, text="Preview Selected")
+    preview_button.pack(side="left")
+
+    remove_button = ttk.Button(actions, text="Remove Selected")
+    remove_button.pack(side="left", padx=(8, 0))
+
+    cancel_button = ttk.Button(actions, text="Cancel All Batch", style="Accent.TButton")
+    cancel_button.pack(side="left", padx=(8, 0))
+
+    ttk.Button(actions, text="Close", command=_close_batch_window).pack(side="right")
+
+    def _refresh_files_list():
+        selected_count = len(selected_files)
+        file_text = "file" if selected_count == 1 else "files"
+        count_text_var.set(f"Selected for batch: {selected_count} {file_text}")
+
+        files_listbox.delete(0, tk.END)
+        for file_name in selected_files:
+            files_listbox.insert(tk.END, file_name)
+
+        if selected_count == 0:
+            if not empty_hint_label.winfo_ismapped():
+                empty_hint_label.pack(anchor="w", pady=(0, 8))
+        else:
+            if empty_hint_label.winfo_ismapped():
+                empty_hint_label.pack_forget()
+
+        initial_index = 0
+        if current_filename and current_filename in selected_files:
+            initial_index = selected_files.index(current_filename)
+
+        if files_listbox.size() > 0:
+            files_listbox.selection_set(initial_index)
+            files_listbox.activate(initial_index)
+            files_listbox.see(initial_index)
+
+        if selected_count > 0:
+            preview_button.state(["!disabled"])
+            remove_button.state(["!disabled"])
+        else:
+            preview_button.state(["disabled"])
+            remove_button.state(["disabled"])
+
+        if batch_context is not None and not batch_context.get("cancelled", False):
+            cancel_button.state(["!disabled"])
+        else:
+            cancel_button.state(["disabled"])
+
+    def _preview_selected_file(_event=None):
+        selection = files_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select one file to preview.", parent=win)
+            return "break"
+
+        target_file = files_listbox.get(selection[0])
+        preview_specific_pending_pdf(target_file)
+        return "break"
+
+    def _remove_selected_batch_files():
+        selection = files_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Select one or more files to remove from the batch.", parent=win)
+            return
+
+        chosen_files = [files_listbox.get(idx) for idx in selection]
+        removable_files = []
+        blocked_current = False
+
+        for file_name in chosen_files:
+            if current_filename and file_name == current_filename:
+                blocked_current = True
+                continue
+            removable_files.append(file_name)
+
+        if blocked_current:
+            messagebox.showwarning(
+                "Current File Locked",
+                "The file currently being processed cannot be removed. Use Cancel All Batch to stop processing.",
+                parent=win,
+            )
+
+        if not removable_files:
+            return
+
+        if not messagebox.askyesno(
+            "Remove Selected",
+            f"Remove {len(removable_files)} selected file(s) from this batch queue?",
+            parent=win,
+        ):
+            return
+
+        for file_name in removable_files:
+            try:
+                selected_files.remove(file_name)
+            except ValueError:
+                pass
+
+        _refresh_files_list()
+
+    def _cancel_all_batch_processing():
+        if batch_context is None:
+            messagebox.showwarning(
+                "Not Available",
+                "Batch cancellation is only available while running an active batch process.",
+                parent=win,
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Cancel Batch Processing",
+            "Cancel processing for all remaining batch files?",
+            parent=win,
+        ):
+            return
+
+        batch_context["cancelled"] = True
+        _close_batch_window()
+
+        if callable(cancel_batch_callback):
+            cancel_batch_callback()
+
+    files_listbox.bind("<Double-Button-1>", _preview_selected_file)
+    files_listbox.bind("<Return>", _preview_selected_file)
+    preview_button.configure(command=_preview_selected_file)
+    remove_button.configure(command=_remove_selected_batch_files)
+    cancel_button.configure(command=_cancel_all_batch_processing)
+
+    _refresh_files_list()
 
 
 def _create_startup_loading_window(
@@ -4253,6 +6067,11 @@ clear_sources_button.pack(side="left", padx=6)
 _configure_icon_button(clear_sources_button, "clear_selection", TOOLBAR_ICON_SOURCE_CLEAR, "Clear All")
 _attach_hover_tooltip(clear_sources_button, "Clear all employee source entries")
 
+view_parsed_names_button = ttk.Button(name_buttons, style="ToolbarIcon.TButton", command=show_parsed_names_window)
+view_parsed_names_button.pack(side="left", padx=6)
+_configure_icon_button(view_parsed_names_button, "preview", TOOLBAR_ICON_PREVIEW, "View Parsed")
+_attach_hover_tooltip(view_parsed_names_button, "View all parsed employee names")
+
 ttk.Label(
     names_card,
     textvariable=employee_list_status_var,
@@ -4266,6 +6085,7 @@ list_card.pack(fill="both", expand=True)
 header_row = ttk.Frame(list_card, style="Card.TFrame")
 header_row.pack(fill="x")
 ttk.Label(header_row, text="Pending Files", style="Card.TLabel").pack(side="left")
+ttk.Label(header_row, textvariable=pending_files_count_var, style="Card.TLabel").pack(side="left", padx=(8, 0))
 
 listbox_container = ttk.Frame(list_card, style="Card.TFrame")
 listbox_container.pack(fill="both", expand=True, pady=(12, 0))
@@ -4336,6 +6156,7 @@ btn_frame = ttk.Frame(main_container)
 btn_frame.pack(pady=20)
 ttk.Button(btn_frame, text="New Record", width=20, command=start_new_record_batch, style="Accent.TButton").grid(row=0, column=0, padx=8)
 ttk.Button(btn_frame, text="Merge Existing", width=20, command=start_merge_existing_batch).grid(row=0, column=1, padx=8)
+ttk.Button(btn_frame, text="Edit Employee Details", width=22, command=employee_details_editor_window).grid(row=0, column=2, padx=8)
 
 def _run_startup_sequence():
     _center_window_to_current_size(root)
