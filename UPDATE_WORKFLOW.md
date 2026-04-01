@@ -90,7 +90,7 @@ The release workflow also syncs this URL into `main.py` as `DEFAULT_UPDATE_MANIF
 Run:
 
 ```powershell
-build_release.bat
+python scripts/build.py --target release --version 1.0.1
 ```
 
 Output:
@@ -101,8 +101,10 @@ Output:
 
 If you only need one target locally:
 
-- Installer only: build_installer.bat
-- Portable only: build_portable.bat
+- Installer only: python scripts/build.py --target installer
+- Portable only: python scripts/build.py --target portable
+
+Optional Windows BAT wrappers are available under `scripts/bat/`.
 
 ## 7) Configure client app manually (only if needed)
 

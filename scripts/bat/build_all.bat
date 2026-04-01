@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0\..\.."
 
 if not defined PDF_AUTOTOOL_PYTHON (
     for %%I in (python.exe) do set "PDF_AUTOTOOL_PYTHON=%%~$PATH:I"

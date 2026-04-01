@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+cd /d "%~dp0\..\.."
 
 if not defined PDF_AUTOTOOL_PYTHON (
     for %%I in (python.exe) do set "PDF_AUTOTOOL_PYTHON=%%~$PATH:I"
@@ -67,9 +67,9 @@ if errorlevel 1 (
 echo.
 echo [2/2] Building installer...
 if /I "!ISCC_EXE!"=="iscc" (
-    iscc "%~dp0installer\PDFRecordManager.iss"
+    iscc "installer\PDFRecordManager.iss"
 ) else (
-    "!ISCC_EXE!" "%~dp0installer\PDFRecordManager.iss"
+    "!ISCC_EXE!" "installer\PDFRecordManager.iss"
 )
 if errorlevel 1 (
     echo.

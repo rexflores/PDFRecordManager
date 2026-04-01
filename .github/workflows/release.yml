@@ -124,18 +124,18 @@ jobs:
 
       - name: Build installer and portable artifacts
         shell: pwsh
-        env:
-          PDF_AUTOTOOL_PYTHON: ${{ steps.python-runtime.outputs.python_exe }}
-          PDF_AUTOTOOL_ISCC: ${{ steps.inno.outputs.iscc_exe }}
-          PDF_AUTOTOOL_VERSION: ${{ steps.meta.outputs.version }}
-          PDF_AUTOTOOL_UPDATE_FEED_URL: ${{ steps.meta.outputs.feed_url }}
         run: |
           $buildLog = "build_release.log"
           if (Test-Path $buildLog) {
             Remove-Item $buildLog -Force
           }
 
-          cmd /c "build_release.bat" *>&1 | Tee-Object -FilePath $buildLog
+          $pythonExe = "${{ steps.python-runtime.outputs.python_exe }}"
+          & $pythonExe scripts/build.py `
+            --target release `
+            --version "${{ steps.meta.outputs.version }}" `
+            --update-url "${{ steps.meta.outputs.feed_url }}" `
+            --iscc-exe "${{ steps.inno.outputs.iscc_exe }}" 2>&1 | Tee-Object -FilePath $buildLog
 
           if ($LASTEXITCODE -ne 0) {
             Write-Host "Build failed with exit code $LASTEXITCODE"

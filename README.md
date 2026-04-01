@@ -11,11 +11,22 @@ Each official release publishes two Windows distributions:
 
 ## Local Build Commands
 
-- `build_onedir.bat`: build folder-based executable
-- `build_onefile.bat`: build single executable
-- `build_installer.bat`: build installer (requires Inno Setup)
-- `build_portable.bat`: build portable package
-- `build_release.bat`: build installer + portable together
+Preferred (no BAT required):
+
+- `python scripts/build.py --target release`: build installer + portable together
+- `python scripts/build.py --target installer`: build installer only (requires Inno Setup)
+- `python scripts/build.py --target portable`: build portable package only
+- `python scripts/build.py --target onedir`: build folder-based executable only
+- `python scripts/build.py --target onefile`: build single executable only
+- `python scripts/build.py --target all`: build onedir + onefile together
+
+Optional Windows BAT wrappers (kept for convenience):
+
+- `scripts/bat/build_onedir.bat`
+- `scripts/bat/build_onefile.bat`
+- `scripts/bat/build_installer.bat`
+- `scripts/bat/build_portable.bat`
+- `scripts/bat/build_release.bat`
 
 ## Official GitHub Publishing
 

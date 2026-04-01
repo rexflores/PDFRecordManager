@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+cd /d "%~dp0\..\.."
 
 if not defined PDF_AUTOTOOL_PYTHON (
     for %%I in (python.exe) do set "PDF_AUTOTOOL_PYTHON=%%~$PATH:I"
@@ -34,7 +34,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "PORTABLE_DIR=%~dp0dist\portable"
+set "PORTABLE_DIR=dist\portable"
 set "PORTABLE_APP_DIR=%PORTABLE_DIR%\PDFRecordManager-Portable"
 set "PORTABLE_EXE=%PORTABLE_APP_DIR%\PDFRecordManager.exe"
 set "PORTABLE_README=%PORTABLE_DIR%\README-Portable.txt"
@@ -44,7 +44,7 @@ if not exist "%PORTABLE_DIR%" mkdir "%PORTABLE_DIR%"
 if exist "%PORTABLE_APP_DIR%" rmdir /s /q "%PORTABLE_APP_DIR%"
 
 echo [2/2] Packaging portable files...
-robocopy "%~dp0dist\PDFRecordManager" "%PORTABLE_APP_DIR%" /E /NFL /NDL /NJH /NJS /NC /NS >nul
+robocopy "dist\PDFRecordManager" "%PORTABLE_APP_DIR%" /E /NFL /NDL /NJH /NJS /NC /NS >nul
 if errorlevel 8 (
     echo Failed to copy onedir output into portable package folder.
     exit /b 1

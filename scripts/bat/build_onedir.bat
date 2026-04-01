@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0\..\.."
 
 set "PYTHON_EXE="
 if defined PDF_AUTOTOOL_PYTHON (
@@ -28,13 +28,13 @@ if not exist "%PYTHON_EXE%" (
 )
 
 echo Using Python: %PYTHON_EXE%
-echo Building onefile EXE using PDFRecordManager.onefile.spec...
-"%PYTHON_EXE%" -m PyInstaller --clean -y PDFRecordManager.onefile.spec
+echo Building onedir EXE using PDFRecordManager.spec...
+"%PYTHON_EXE%" -m PyInstaller --clean -y PDFRecordManager.spec
 if errorlevel 1 (
     echo Build failed.
     exit /b 1
 )
 
 echo Build complete.
-echo Output: dist\PDFRecordManager.exe
+echo Output: dist\PDFRecordManager\PDFRecordManager.exe
 exit /b 0

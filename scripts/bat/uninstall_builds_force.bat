@@ -1,21 +1,17 @@
 @echo off
 setlocal EnableDelayedExpansion
-cd /d "%~dp0"
+cd /d "%~dp0\..\.."
 
 echo ===============================================
-echo PDF Record Manager - Remove Build Artifacts
+echo PDF Record Manager - Force Remove Build Artifacts
 echo ===============================================
-echo This will remove generated files only:
+echo Running in force mode (no confirmation prompt).
+echo Removing generated files only:
 echo   - build\
 echo   - dist\
 echo   - all __pycache__ folders
 echo   - all *.pyc and *.pyo files
 echo.
-choice /C YN /N /M "Continue? [Y/N]: "
-if errorlevel 2 (
-    echo Cleanup canceled.
-    exit /b 0
-)
 
 set "REMOVED_ANY=0"
 
@@ -58,7 +54,7 @@ for /R %%F in (*.pyo) do (
 if "!REMOVED_ANY!"=="0" (
     echo No build artifacts were found.
 ) else (
-    echo Cleanup complete.
+    echo Force cleanup complete.
 )
 
 exit /b 0

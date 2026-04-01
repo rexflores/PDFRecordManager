@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0\..\.."
 
 if not defined PDF_AUTOTOOL_PYTHON (
     for %%I in (python.exe) do set "PDF_AUTOTOOL_PYTHON=%%~$PATH:I"
@@ -28,15 +28,15 @@ echo.
 
 if defined PDF_AUTOTOOL_VERSION (
     echo [0/2] Syncing release metadata...
-    if not exist "%~dp0scripts\set_release_metadata.py" (
+    if not exist "%~dp0..\set_release_metadata.py" (
         echo Missing metadata sync script: scripts\set_release_metadata.py
         exit /b 1
     )
 
     if defined PDF_AUTOTOOL_UPDATE_FEED_URL (
-        "%PDF_AUTOTOOL_PYTHON%" "%~dp0scripts\set_release_metadata.py" --version "%PDF_AUTOTOOL_VERSION%" --update-url "%PDF_AUTOTOOL_UPDATE_FEED_URL%"
+        "%PDF_AUTOTOOL_PYTHON%" "%~dp0..\set_release_metadata.py" --version "%PDF_AUTOTOOL_VERSION%" --update-url "%PDF_AUTOTOOL_UPDATE_FEED_URL%"
     ) else (
-        "%PDF_AUTOTOOL_PYTHON%" "%~dp0scripts\set_release_metadata.py" --version "%PDF_AUTOTOOL_VERSION%"
+        "%PDF_AUTOTOOL_PYTHON%" "%~dp0..\set_release_metadata.py" --version "%PDF_AUTOTOOL_VERSION%"
     )
 
     if errorlevel 1 (
