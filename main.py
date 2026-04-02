@@ -80,6 +80,17 @@ BG_COLOR = "#0F172A"
 SURFACE_COLOR = "#1E293B"
 TEXT_COLOR = "#E2E8F0"
 SUBTEXT_COLOR = "#94A3B8"
+SHELL_BG_COLOR = BG_COLOR
+SURFACE_ELEVATED_COLOR = "#24344f"
+FIELD_BG_COLOR = "#131c2f"
+BORDER_COLOR = "#334155"
+ACTION_BAR_BG = "#18243a"
+STATUS_ACCENT_COLOR = "#93c5fd"
+MUTED_BUTTON_BG = "#334155"
+MUTED_BUTTON_HOVER_BG = "#415775"
+STATUS_BADGE_BG = "#2b5f98"
+STATUS_BADGE_TEXT = "#f8fbff"
+STATUS_SURFACE_BG = "#20314c"
 PENDING_ROW_BG = "#121d31"
 PENDING_ROW_HOVER_BG = "#1a2a45"
 PENDING_ROW_SELECTED_BG = "#27456f"
@@ -88,10 +99,11 @@ PENDING_ROW_TEXT = "#e5edff"
 LISTBOX_BG = "#101a2b"
 LISTBOX_BORDER = "#2f405d"
 LISTBOX_TEXT = "#e5ecf8"
+FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -176,7 +188,7 @@ def _apply_app_icon(window):
 
 
 def apply_theme(window):
-    window.configure(bg=BG_COLOR)
+    window.configure(bg=SHELL_BG_COLOR)
     style = ttk.Style(window)
     try:
         style.theme_use("clam")
@@ -184,7 +196,7 @@ def apply_theme(window):
         pass
     style.configure(
         "TFrame",
-        background=BG_COLOR,
+        background=SHELL_BG_COLOR,
     )
     style.configure(
         "Card.TFrame",
@@ -192,16 +204,48 @@ def apply_theme(window):
         relief="flat",
     )
     style.configure(
+        "Shell.TFrame",
+        background=SHELL_BG_COLOR,
+    )
+    style.configure(
+        "HeaderCard.TFrame",
+        background=SURFACE_ELEVATED_COLOR,
+        relief="flat",
+    )
+    style.configure(
+        "ActionBar.TFrame",
+        background=ACTION_BAR_BG,
+        relief="flat",
+    )
+    style.configure(
         "Title.TLabel",
-        background=BG_COLOR,
+        background=SHELL_BG_COLOR,
+        foreground=TEXT_COLOR,
+        font=("Segoe UI Semibold", 20),
+    )
+    style.configure(
+        "HeaderTitle.TLabel",
+        background=SURFACE_ELEVATED_COLOR,
         foreground=TEXT_COLOR,
         font=("Segoe UI Semibold", 20),
     )
     style.configure(
         "Subheading.TLabel",
-        background=BG_COLOR,
+        background=SHELL_BG_COLOR,
         foreground=SUBTEXT_COLOR,
         font=("Segoe UI", 10),
+    )
+    style.configure(
+        "HeaderSubheading.TLabel",
+        background=SURFACE_ELEVATED_COLOR,
+        foreground=SUBTEXT_COLOR,
+        font=("Segoe UI", 10),
+    )
+    style.configure(
+        "HeaderStatus.TLabel",
+        background=SURFACE_ELEVATED_COLOR,
+        foreground=STATUS_BADGE_TEXT,
+        font=("Segoe UI Semibold", 10),
     )
     style.configure(
         "Card.TLabel",
@@ -210,8 +254,66 @@ def apply_theme(window):
         font=("Segoe UI", 11),
     )
     style.configure(
+        "SectionTitle.TLabel",
+        background=SURFACE_COLOR,
+        foreground=TEXT_COLOR,
+        font=("Segoe UI Semibold", 11),
+    )
+    style.configure(
+        "FieldLabel.TLabel",
+        background=SURFACE_COLOR,
+        foreground=SUBTEXT_COLOR,
+        font=("Segoe UI", 9),
+    )
+    style.configure(
+        "CardMuted.TLabel",
+        background=SURFACE_COLOR,
+        foreground=SUBTEXT_COLOR,
+        font=("Segoe UI", 10),
+    )
+    style.configure(
+        "StatusStrong.TLabel",
+        background=SURFACE_COLOR,
+        foreground="#f3f8ff",
+        font=("Segoe UI Semibold", 11),
+    )
+    style.configure(
+        "StatusText.TLabel",
+        background=SHELL_BG_COLOR,
+        foreground="#deebff",
+        font=("Segoe UI Semibold", 10),
+    )
+    style.configure(
+        "StatusBadge.TFrame",
+        background=STATUS_BADGE_BG,
+        relief="flat",
+    )
+    style.configure(
+        "StatusBadge.TLabel",
+        background=STATUS_BADGE_BG,
+        foreground=STATUS_BADGE_TEXT,
+        font=("Segoe UI Semibold", 10),
+    )
+    style.configure(
+        "StatusSurface.TFrame",
+        background=STATUS_SURFACE_BG,
+        relief="flat",
+    )
+    style.configure(
+        "StatusSurface.TLabel",
+        background=STATUS_SURFACE_BG,
+        foreground="#f2f7ff",
+        font=("Segoe UI Semibold", 10),
+    )
+    style.configure(
+        "ActionTitle.TLabel",
+        background=ACTION_BAR_BG,
+        foreground=SUBTEXT_COLOR,
+        font=("Segoe UI", 9),
+    )
+    style.configure(
         "TLabel",
-        background=BG_COLOR,
+        background=SHELL_BG_COLOR,
         foreground=TEXT_COLOR,
         font=("Segoe UI", 11),
     )
@@ -325,6 +427,44 @@ def apply_theme(window):
         foreground="white",
     )
     style.configure(
+        "PrimaryAction.TButton",
+        background=ACCENT_COLOR,
+        foreground="white",
+        font=("Segoe UI Semibold", 11),
+        padding=(14, 8),
+        borderwidth=0,
+    )
+    style.map(
+        "PrimaryAction.TButton",
+        background=[("active", "#5090ff"), ("disabled", "#4c566a")],
+    )
+    style.configure(
+        "SecondaryAction.TButton",
+        background=MUTED_BUTTON_BG,
+        foreground=TEXT_COLOR,
+        font=("Segoe UI Semibold", 11),
+        padding=(14, 8),
+        borderwidth=0,
+    )
+    style.map(
+        "SecondaryAction.TButton",
+        background=[("active", MUTED_BUTTON_HOVER_BG), ("disabled", "#2b3446")],
+        foreground=[("disabled", SUBTEXT_COLOR)],
+    )
+    style.configure(
+        "Subtle.TButton",
+        background=MUTED_BUTTON_BG,
+        foreground=TEXT_COLOR,
+        font=("Segoe UI Semibold", 10),
+        padding=(10, 7),
+        borderwidth=0,
+    )
+    style.map(
+        "Subtle.TButton",
+        background=[("active", MUTED_BUTTON_HOVER_BG), ("disabled", "#2b3446")],
+        foreground=[("disabled", SUBTEXT_COLOR)],
+    )
+    style.configure(
         "ToolbarIcon.TButton",
         background=ACCENT_COLOR,
         foreground="white",
@@ -338,17 +478,26 @@ def apply_theme(window):
     )
     style.configure(
         "TEntry",
-        fieldbackground="#131c2f",
+        fieldbackground=FIELD_BG_COLOR,
         foreground=TEXT_COLOR,
         insertcolor=TEXT_COLOR,
-        bordercolor="#334155",
+        bordercolor=BORDER_COLOR,
         relief="flat",
     )
     style.configure(
         "TCombobox",
-        fieldbackground="#131c2f",
+        fieldbackground=FIELD_BG_COLOR,
         foreground=TEXT_COLOR,
         arrowcolor=ACCENT_COLOR,
+    )
+    style.map(
+        "TCombobox",
+        foreground=[("readonly", TEXT_COLOR), ("disabled", SUBTEXT_COLOR)],
+        fieldbackground=[("readonly", FIELD_BG_COLOR), ("disabled", "#1b273d")],
+        background=[("readonly", FIELD_BG_COLOR), ("active", FIELD_BG_COLOR)],
+        selectforeground=[("readonly", TEXT_COLOR)],
+        selectbackground=[("readonly", FIELD_BG_COLOR)],
+        arrowcolor=[("readonly", ACCENT_COLOR), ("disabled", SUBTEXT_COLOR)],
     )
     style.configure(
         "Success.Horizontal.TProgressbar",
@@ -361,11 +510,11 @@ def apply_theme(window):
     style.configure(
         "Vertical.TScrollbar",
         gripcount=0,
-        background="#334155",
+        background=BORDER_COLOR,
         troughcolor="#0b1220",
         bordercolor="#0b1220",
-        lightcolor="#334155",
-        darkcolor="#334155",
+        lightcolor=BORDER_COLOR,
+        darkcolor=BORDER_COLOR,
         arrowcolor="#64748b",
         relief="flat",
         arrowsize=10,
@@ -379,11 +528,11 @@ def apply_theme(window):
     style.configure(
         "Horizontal.TScrollbar",
         gripcount=0,
-        background="#334155",
+        background=BORDER_COLOR,
         troughcolor="#0b1220",
         bordercolor="#0b1220",
-        lightcolor="#334155",
-        darkcolor="#334155",
+        lightcolor=BORDER_COLOR,
+        darkcolor=BORDER_COLOR,
         arrowcolor="#64748b",
         relief="flat",
         arrowsize=10,
@@ -430,6 +579,10 @@ def apply_theme(window):
 
     window.option_add("*TCombobox*Listbox.foreground", TEXT_COLOR)
     window.option_add("*TCombobox*Listbox.background", SURFACE_COLOR)
+    window.option_add("*TCombobox*Listbox.selectBackground", ACCENT_COLOR)
+    window.option_add("*TCombobox*Listbox.selectForeground", "white")
+    window.option_add("*TCombobox*Listbox.highlightColor", FOCUS_RING_COLOR)
+    window.option_add("*TCombobox*Listbox.highlightBackground", LISTBOX_BORDER)
 
 
 def _hex_color_to_rgba(hex_color, alpha=255):
@@ -1199,7 +1352,7 @@ def _apply_modern_listbox_style(listbox, *, compact=False, export_selection=None
         "borderwidth": 0,
         "highlightthickness": 1,
         "highlightbackground": LISTBOX_BORDER,
-        "highlightcolor": ACCENT_COLOR,
+        "highlightcolor": FOCUS_RING_COLOR,
         "activestyle": "none",
         "selectborderwidth": 0,
         "disabledforeground": SUBTEXT_COLOR,
@@ -2136,39 +2289,35 @@ def _position_suggestion_popup(combobox):
     state = _get_suggestion_popup_state(combobox)
     popup = state.get("popup")
     listbox = state.get("listbox")
-    if (
-        popup is None
-        or not popup.winfo_exists()
-        or listbox is None
-        or not listbox.winfo_exists()
-        or not combobox.winfo_exists()
-    ):
-        return False
-
     try:
+        if popup is None or listbox is None:
+            return False
+        if not popup.winfo_exists() or not listbox.winfo_exists() or not combobox.winfo_exists():
+            return False
+
         combobox.update_idletasks()
         popup.update_idletasks()
-    except tk.TclError:
+
+        visible_rows = max(1, int(listbox.cget("height")))
+        popup_width = max(combobox.winfo_width(), 320)
+        popup_height = min(240, (visible_rows * 22) + 6)
+
+        x_pos = combobox.winfo_rootx()
+        y_pos = combobox.winfo_rooty() + combobox.winfo_height()
+        screen_w = combobox.winfo_screenwidth()
+        screen_h = combobox.winfo_screenheight()
+
+        if x_pos + popup_width > screen_w - 8:
+            x_pos = max(0, screen_w - popup_width - 8)
+        if y_pos + popup_height > screen_h - 8:
+            y_pos = max(0, combobox.winfo_rooty() - popup_height)
+
+        popup.geometry(f"{popup_width}x{popup_height}+{x_pos}+{y_pos}")
+        popup.deiconify()
+        popup.lift()
+        return True
+    except (tk.TclError, ValueError, TypeError):
         return False
-
-    visible_rows = max(1, int(listbox.cget("height")))
-    popup_width = max(combobox.winfo_width(), 320)
-    popup_height = min(240, (visible_rows * 22) + 6)
-
-    x_pos = combobox.winfo_rootx()
-    y_pos = combobox.winfo_rooty() + combobox.winfo_height()
-    screen_w = combobox.winfo_screenwidth()
-    screen_h = combobox.winfo_screenheight()
-
-    if x_pos + popup_width > screen_w - 8:
-        x_pos = max(0, screen_w - popup_width - 8)
-    if y_pos + popup_height > screen_h - 8:
-        y_pos = max(0, combobox.winfo_rooty() - popup_height)
-
-    popup.geometry(f"{popup_width}x{popup_height}+{x_pos}+{y_pos}")
-    popup.deiconify()
-    popup.lift()
-    return True
 
 
 def _start_suggestion_popup_tracking(combobox, interval_ms=40):
@@ -2183,6 +2332,14 @@ def _start_suggestion_popup_tracking(combobox, interval_ms=40):
         state["tracker_after_id"] = None
 
     def _track_position():
+        try:
+            if not combobox.winfo_exists():
+                state["tracker_after_id"] = None
+                return
+        except tk.TclError:
+            state["tracker_after_id"] = None
+            return
+
         if not _position_suggestion_popup(combobox):
             state["tracker_after_id"] = None
             return
@@ -2248,10 +2405,26 @@ def _schedule_suggestion_popup_close(combobox, delay_ms=140):
         state = _get_suggestion_popup_state(combobox)
         popup = state.get("popup")
         listbox = state.get("listbox")
-        if popup is None or not popup.winfo_exists():
+        try:
+            if popup is None or not popup.winfo_exists():
+                return
+        except tk.TclError:
             return
 
-        focus_widget = combobox.focus_get()
+        try:
+            focus_name = str(combobox.tk.call("focus") or "")
+        except tk.TclError:
+            focus_name = ""
+
+        # ttk Combobox popdown is a detached Tcl widget; keep the popup while it owns focus.
+        if focus_name and (".popdown" in focus_name or focus_name.endswith("popdown")):
+            return
+
+        try:
+            focus_widget = combobox.focus_get()
+        except (tk.TclError, KeyError):
+            focus_widget = None
+
         if focus_widget is combobox:
             return
         if listbox is not None and focus_widget is listbox:
@@ -2261,7 +2434,10 @@ def _schedule_suggestion_popup_close(combobox, delay_ms=140):
 
         _hide_suggestion_popup(combobox)
 
-    combobox.after(delay_ms, _close_if_focus_left)
+    try:
+        combobox.after(delay_ms, _close_if_focus_left)
+    except tk.TclError:
+        pass
 
 
 def _focus_suggestion_popup_list(combobox):
@@ -3154,6 +3330,27 @@ def _normalize_record_year_inputs(latest_text, earliest_text):
     return latest_year, earliest_year
 
 
+def _get_year_input_guidance(latest_text, earliest_text):
+    latest = str(latest_text or "").strip()
+    earliest = str(earliest_text or "").strip()
+
+    if not latest and not earliest:
+        return "Enter Latest Year or Oldest Year (at least one is required)."
+    if latest and not latest.isdigit():
+        return "Latest Year must contain digits only (example: 2025)."
+    if earliest and not earliest.isdigit():
+        return "Oldest Year must contain digits only (example: 2018)."
+
+    years = _normalize_record_year_inputs(latest, earliest)
+    if years is None:
+        return "Enter Latest Year or Oldest Year (at least one is required)."
+
+    latest_year, earliest_year = years
+    if latest_year == earliest_year:
+        return f"Year will be saved as {latest_year}."
+    return f"Year range will be normalized to {latest_year} - {earliest_year}."
+
+
 def _build_record_filename(name, latest_year, earliest_year):
     latest_int = int(latest_year)
     earliest_int = int(earliest_year)
@@ -3589,6 +3786,7 @@ pending_snapshot = set()
 auto_refresh_job_id = None
 ui_icon_images = {}
 pending_row_preview_buttons = []
+name_buttons_container = None
 add_sources_button = None
 remove_sources_button = None
 clear_sources_button = None
@@ -3724,6 +3922,65 @@ def _configure_icon_button(button, icon_name, fallback_icon, label):
         )
 
 
+def _refresh_name_toolbar_layout():
+    if name_buttons_container is None or not name_buttons_container.winfo_exists():
+        return
+
+    buttons = [
+        add_sources_button,
+        remove_sources_button,
+        clear_sources_button,
+        view_parsed_names_button,
+    ]
+    live_buttons = [button for button in buttons if button is not None and button.winfo_exists()]
+    if not live_buttons:
+        return
+
+    for button in live_buttons:
+        try:
+            button.pack_forget()
+        except tk.TclError:
+            pass
+        try:
+            button.grid_forget()
+        except tk.TclError:
+            pass
+
+    show_text_label = show_text_with_icons_var.get()
+    if show_text_label:
+        name_buttons_container.columnconfigure(0, weight=1, uniform="name_toolbar")
+        name_buttons_container.columnconfigure(1, weight=1, uniform="name_toolbar")
+        for index, button in enumerate(live_buttons):
+            row_index = index // 2
+            col_index = index % 2
+            button.grid(row=row_index, column=col_index, sticky="ew", padx=4, pady=4)
+        return
+
+    name_buttons_container.columnconfigure(0, weight=0)
+    name_buttons_container.columnconfigure(1, weight=0)
+    for index, button in enumerate(live_buttons):
+        button.pack(side="left", padx=(0, 6) if index == 0 else 6)
+
+
+def _refresh_pending_toolbar_layout():
+    if (
+        pending_master_actions is None
+        or not pending_master_actions.winfo_exists()
+        or pending_master_toggle_button is None
+        or not pending_master_toggle_button.winfo_exists()
+    ):
+        return
+
+    try:
+        pending_master_toggle_button.pack_forget()
+        pending_master_actions.pack_forget()
+    except tk.TclError:
+        return
+
+    pending_master_toggle_button.pack(side="left", anchor="w")
+    pending_master_actions.pack(side="right")
+
+
 def _update_icon_button_labels():
     button_specs = (
         (add_sources_button, "source_add", TOOLBAR_ICON_SOURCE_ADD, "Add Sources"),
@@ -3743,6 +4000,8 @@ def _update_icon_button_labels():
             continue
         _configure_icon_button(button, "preview", TOOLBAR_ICON_PREVIEW, "Preview")
 
+    _refresh_name_toolbar_layout()
+    _refresh_pending_toolbar_layout()
     _refresh_pending_master_toggle_state()
 
 
@@ -3768,9 +4027,9 @@ def _configure_master_toggle_button(selection_state, enabled):
         "all": TOOLBAR_ICON_SELECT_ALL,
     }
     label_map = {
-        "none": "Select All",
-        "partial": "Partially Selected",
-        "all": "All Selected",
+        "none": "Select",
+        "partial": "Partial",
+        "all": "All",
     }
 
     icon_key = icon_key_map.get(selection_state, "select_none")
@@ -4393,31 +4652,35 @@ def rotate_selected_pending_pdfs(
     page_border_normal = LISTBOX_BORDER
     page_border_selected = ACCENT_COLOR
 
-    content = ttk.Frame(win, padding=14, style="TFrame")
+    content = ttk.Frame(win, padding=(14, 12, 14, 14), style="Shell.TFrame")
     content.pack(fill="both", expand=True)
 
+    header_card = ttk.Frame(content, style="HeaderCard.TFrame", padding=(12, 10))
+    header_card.pack(fill="x", pady=(0, 10))
     ttk.Label(
-        content,
+        header_card,
         text="Batch PDF Rotation",
-        style="Card.TLabel",
+        style="HeaderSubheading.TLabel",
     ).pack(anchor="w")
     ttk.Label(
-        content,
+        header_card,
         text=(
-            "PDF24-like selection: click a row/page to focus, Ctrl+Click to multi-select rows/pages, "
-            "Shift+Click to span-select between start and end, "
-            "Ctrl+A for all in current context, Shift+Scroll over a row to scroll that row's pages, "
-            "Ctrl+Scroll over pages to resize preview size."
+            "Click a PDF row to target all pages, Ctrl+Click to multi-select, Shift+Click to range-select, "
+            "Ctrl+A to select all in the active context, Shift+Scroll to move a row horizontally, "
+            "and Ctrl+Scroll over previews to resize page thumbnails."
         ),
-        style="Subheading.TLabel",
-        wraplength=1000,
+        style="HeaderSubheading.TLabel",
+        wraplength=1020,
         justify="left",
-    ).pack(anchor="w", pady=(2, 10))
+    ).pack(anchor="w", pady=(4, 0))
 
-    controls = ttk.Frame(content, style="Card.TFrame")
-    controls.pack(fill="x", pady=(0, 8))
+    controls_card = ttk.Frame(content, style="Card.TFrame", padding=(12, 10))
+    controls_card.pack(fill="x", pady=(0, 8))
 
-    ttk.Label(controls, text="Page Size:").pack(side="left")
+    controls = ttk.Frame(controls_card, style="Card.TFrame")
+    controls.pack(fill="x")
+
+    ttk.Label(controls, text="Preview Page Size", style="FieldLabel.TLabel").pack(side="left")
     page_size_scale = ttk.Scale(
         controls,
         from_=ROTATION_PREVIEW_THUMB_MIN_WIDTH,
@@ -4428,7 +4691,7 @@ def rotate_selected_pending_pdfs(
     )
     page_size_scale.pack(side="left", padx=(8, 6))
 
-    page_size_value_label = ttk.Label(controls, text=f"{thumbnail_size_var.get()} px", style="Subheading.TLabel")
+    page_size_value_label = ttk.Label(controls, text=f"{thumbnail_size_var.get()} px", style="CardMuted.TLabel")
     page_size_value_label.pack(side="left", padx=(0, 12))
 
     ttk.Checkbutton(
@@ -4437,25 +4700,42 @@ def rotate_selected_pending_pdfs(
         variable=backup_before_rotate_var,
     ).pack(side="right")
 
-    rotate_actions = ttk.Frame(content, style="TFrame")
+    rotate_actions = ttk.Frame(content, style="ActionBar.TFrame", padding=(12, 10))
     rotate_actions.pack(fill="x", pady=(0, 8))
+    ttk.Label(rotate_actions, text="Rotation Actions", style="ActionTitle.TLabel").pack(anchor="w")
 
-    rotate_left_button = ttk.Button(rotate_actions, text="Rotate Left 90\N{DEGREE SIGN}", style="Accent.TButton")
+    rotate_buttons = ttk.Frame(rotate_actions, style="ActionBar.TFrame")
+    rotate_buttons.pack(fill="x", pady=(6, 0))
+
+    rotate_left_button = ttk.Button(
+        rotate_buttons,
+        text="Rotate Left 90\N{DEGREE SIGN}",
+        style="SecondaryAction.TButton",
+    )
     rotate_left_button.pack(side="left")
 
-    rotate_right_button = ttk.Button(rotate_actions, text="Rotate Right 90\N{DEGREE SIGN}", style="Accent.TButton")
+    rotate_right_button = ttk.Button(
+        rotate_buttons,
+        text="Rotate Right 90\N{DEGREE SIGN}",
+        style="SecondaryAction.TButton",
+    )
     rotate_right_button.pack(side="left", padx=(8, 0))
 
     save_rotation_button = ttk.Button(
-        rotate_actions,
+        rotate_buttons,
         text="Save Rotation",
-        style="Accent.TButton",
+        style="PrimaryAction.TButton",
     )
     save_rotation_button.pack(side="left", padx=(12, 0))
 
-    ttk.Button(rotate_actions, text="Close", command=_close_rotation_window).pack(side="right")
+    ttk.Button(
+        rotate_buttons,
+        text="Close",
+        command=_close_rotation_window,
+        style="SecondaryAction.TButton",
+    ).pack(side="right")
 
-    ttk.Label(content, textvariable=status_var, style="Subheading.TLabel").pack(anchor="w", pady=(0, 8))
+    ttk.Label(content, textvariable=status_var, style="StatusText.TLabel").pack(anchor="w", pady=(0, 8))
 
     preview_area = ttk.Frame(content, style="Card.TFrame", padding=8)
     preview_area.pack(fill="both", expand=True)
@@ -5360,10 +5640,10 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     win.title("New Record")
     configure_window_geometry(
         win,
-        440,
-        560,
-        min_width=400,
-        min_height=480,
+        520,
+        670,
+        min_width=460,
+        min_height=560,
         margin_x=DEFAULT_MARGIN_X,
         margin_y=DEFAULT_MARGIN_Y,
     )
@@ -5373,7 +5653,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     apply_theme(win)
     scroll_container, scroll_frame = create_scrollable_panel(win)
     scroll_container.pack(fill="both", expand=True)
-    content = ttk.Frame(scroll_frame, padding=20, style="TFrame")
+    content = ttk.Frame(scroll_frame, padding=(18, 16, 18, 18), style="Shell.TFrame")
     content.pack(fill="both", expand=True)
 
     processed_successfully = False
@@ -5396,6 +5676,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     status_var = tk.StringVar(value="Active")
     new_year_var = tk.StringVar()
     old_year_var = tk.StringVar()
+    year_hint_var = tk.StringVar(value=_get_year_input_guidance("", ""))
     dest_path_var = tk.StringVar(value="Select root folder and enter the name to preview the destination path.")
 
     root_trace_id = None
@@ -5424,27 +5705,46 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             letter_var.set(name[0].upper())
         refresh_destination_path()
 
+    def refresh_year_hint(*_args):
+        year_hint_var.set(_get_year_input_guidance(new_year_var.get(), old_year_var.get()))
+
     name_var.trace_add("write", update_letter)
     letter_var.trace_add("write", refresh_destination_path)
     status_var.trace_add("write", refresh_destination_path)
+    new_year_var.trace_add("write", refresh_year_hint)
+    old_year_var.trace_add("write", refresh_year_hint)
     root_trace_id = root_folder.trace_add("write", refresh_destination_path)
 
-    header = ttk.Frame(content)
+    parsed_pending_metadata = parse_filename_metadata(filename)
+    if parsed_pending_metadata:
+        parsed_name = parsed_pending_metadata.get("name", "").strip()
+        if parsed_name:
+            name_var.set(parsed_name)
+        parsed_latest = parsed_pending_metadata.get("latest", "").strip()
+        parsed_earliest = parsed_pending_metadata.get("earliest", "").strip()
+        if parsed_latest:
+            new_year_var.set(parsed_latest)
+        if parsed_earliest:
+            old_year_var.set(parsed_earliest)
+
+    header = ttk.Frame(content, style="HeaderCard.TFrame", padding=(14, 12))
     header.pack(fill="x", pady=(0, 12))
-    ttk.Label(header, text=f"Pending file: {filename}", style="Subheading.TLabel").pack(anchor="w")
-    header_actions = ttk.Frame(header, style="TFrame")
-    header_actions.pack(anchor="w", pady=(4, 0))
+    ttk.Label(header, text="New Record Setup", style="HeaderSubheading.TLabel").pack(anchor="w")
+    ttk.Label(header, text=f"Pending file: {filename}", style="HeaderSubheading.TLabel").pack(anchor="w", pady=(2, 0))
+    header_actions = ttk.Frame(header, style="HeaderCard.TFrame")
+    header_actions.pack(anchor="w", pady=(8, 0))
     ttk.Button(
         header_actions,
         text="Preview Pending",
         width=16,
         command=lambda: preview_specific_pending_pdf(filename),
+        style="Subtle.TButton",
     ).pack(side="left")
     if batch_context:
         ttk.Label(
             header,
             text=f"Batch {batch_context['current']} of {batch_context['total']}",
-            style="Card.TLabel",
+            style="HeaderSubheading.TLabel",
             padding=4,
         ).pack(anchor="w", pady=(4, 0))
         ttk.Button(
@@ -5458,12 +5758,23 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
                 batch_context=batch_context,
                 cancel_batch_callback=cancel_batch_processing_from_new_record,
             ),
+            style="Subtle.TButton",
         ).pack(side="left", padx=(8, 0))
 
-    # UI
-    ttk.Label(content, text="Name:").pack(anchor="w")
+    metadata_card = ttk.Frame(content, style="Card.TFrame", padding=14)
+    metadata_card.pack(fill="x", pady=(0, 10))
+    metadata_card.columnconfigure(0, weight=1)
+    metadata_card.columnconfigure(1, weight=1)
+
+    ttk.Label(metadata_card, text="Record Metadata", style="SectionTitle.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w"
+    )
+
+    ttk.Label(metadata_card, text="Employee Name", style="FieldLabel.TLabel").grid(
+        row=1, column=0, columnspan=2, sticky="w", pady=(10, 2)
+    )
     name_field = ttk.Combobox(
-        content,
+        metadata_card,
         textvariable=name_var,
         values=employee_name_suggestions,
         state="normal",
@@ -5480,32 +5791,67 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         name_field["values"] = get_filtered_name_suggestions(name_var.get())
 
     name_field.configure(postcommand=_refresh_name_choices)
-    name_field.pack(fill="x")
+    name_field.grid(row=2, column=0, columnspan=2, sticky="ew")
 
-    ttk.Label(content, text="Surname First Letter:").pack(anchor="w", pady=(10, 0))
-    ttk.Entry(content, textvariable=letter_var).pack(fill="x")
+    ttk.Label(metadata_card, text="Surname Initial", style="FieldLabel.TLabel").grid(
+        row=3, column=0, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(metadata_card, textvariable=letter_var, width=8).grid(
+        row=4, column=0, sticky="ew", padx=(0, 8)
+    )
 
-    ttk.Label(content, text="Status:").pack(anchor="w", pady=(10, 0))
-    ttk.OptionMenu(content, status_var, status_var.get(), "Active", "Retiree").pack(fill="x")
+    ttk.Label(metadata_card, text="Status", style="FieldLabel.TLabel").grid(
+        row=3, column=1, sticky="w", pady=(10, 2)
+    )
+    status_field = ttk.Combobox(
+        metadata_card,
+        textvariable=status_var,
+        values=("Active", "Retiree"),
+        state="readonly",
+    )
+    _prevent_combobox_mousewheel_value_change(status_field)
+    status_field.grid(row=4, column=1, sticky="ew")
 
-    ttk.Label(content, text="Latest Year (most recent):").pack(anchor="w", pady=(10, 0))
-    ttk.Entry(content, textvariable=new_year_var).pack(fill="x")
+    years_card = ttk.Frame(content, style="Card.TFrame", padding=14)
+    years_card.pack(fill="x", pady=(0, 10))
+    years_card.columnconfigure(0, weight=1)
+    years_card.columnconfigure(1, weight=1)
 
-    ttk.Label(content, text="Oldest Year (first record):").pack(anchor="w", pady=(10, 0))
-    ttk.Entry(content, textvariable=old_year_var).pack(fill="x")
+    ttk.Label(years_card, text="Year Range", style="SectionTitle.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w"
+    )
+    ttk.Label(years_card, text="Latest Year", style="FieldLabel.TLabel").grid(
+        row=1, column=0, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(years_card, textvariable=new_year_var).grid(row=2, column=0, sticky="ew", padx=(0, 8))
 
-    ttk.Label(content, text="Destination Path Preview:").pack(anchor="w", pady=(14, 0))
+    ttk.Label(years_card, text="Oldest Year", style="FieldLabel.TLabel").grid(
+        row=1, column=1, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(years_card, textvariable=old_year_var).grid(row=2, column=1, sticky="ew")
     ttk.Label(
-        content,
-        textvariable=dest_path_var,
-        wraplength=360,
+        years_card,
+        textvariable=year_hint_var,
+        style="CardMuted.TLabel",
+        wraplength=460,
         justify="left",
-        style="Card.TLabel",
+    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+    preview_card = ttk.Frame(content, style="Card.TFrame", padding=14)
+    preview_card.pack(fill="x")
+    ttk.Label(preview_card, text="Destination Path Preview", style="SectionTitle.TLabel").pack(anchor="w")
+    ttk.Label(
+        preview_card,
+        textvariable=dest_path_var,
+        wraplength=460,
+        justify="left",
+        style="CardMuted.TLabel",
         anchor="w",
-        padding=6,
-    ).pack(fill="x")
+        padding=(0, 6),
+    ).pack(fill="x", pady=(6, 0))
 
     refresh_destination_path()
+    refresh_year_hint()
 
     def close_window():
         nonlocal root_trace_id
@@ -5528,12 +5874,12 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
 
         root_path = normalize_path(root_folder.get())
         if not root_path:
-            messagebox.showerror("Error", "Select root folder first.")
+            messagebox.showerror("Error", "Select the Records Root Folder first so the destination can be created.")
             return
 
         pending_path = normalize_path(pending_folder.get())
         if not pending_path:
-            messagebox.showerror("Error", "Select pending folder first.")
+            messagebox.showerror("Error", "Select the Pending Folder first so the source PDF can be located.")
             return
 
         name = name_var.get().strip()
@@ -5545,11 +5891,11 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
 
         try:
             years = _normalize_record_year_inputs(new_year_str, old_year_str)
-        except ValueError as exc:
-            messagebox.showerror("Error", str(exc))
+        except ValueError:
+            messagebox.showerror("Year Validation", _get_year_input_guidance(new_year_str, old_year_str))
             return
         if years is None:
-            messagebox.showerror("Error", "Enter at least one year (Latest or Oldest).")
+            messagebox.showerror("Year Validation", _get_year_input_guidance(new_year_str, old_year_str))
             return
         latest_year, earliest_year = years
 
@@ -5624,7 +5970,38 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         close_window()
         load_pending_files()
 
-    ttk.Button(content, text="Save", command=save_record, style="Accent.TButton").pack(pady=20)
+    action_frame = ttk.Frame(content, style="ActionBar.TFrame", padding=(12, 10))
+    action_frame.pack(fill="x", pady=(14, 0))
+    ttk.Label(action_frame, text="Save Action", style="ActionTitle.TLabel").pack(anchor="w")
+
+    action_buttons = ttk.Frame(action_frame, style="ActionBar.TFrame")
+    action_buttons.pack(fill="x", pady=(6, 0))
+
+    ttk.Button(
+        action_buttons,
+        text="Close",
+        command=close_window,
+        style="SecondaryAction.TButton",
+        width=14,
+    ).pack(side="left")
+    if batch_context:
+        ttk.Button(
+            action_buttons,
+            text="Cancel Batch",
+            command=cancel_batch_processing_from_new_record,
+            style="Subtle.TButton",
+            width=14,
+        ).pack(side="left", padx=(8, 0))
+
+    ttk.Button(
+        action_buttons,
+        text="Save New Record",
+        command=save_record,
+        style="PrimaryAction.TButton",
+        width=18,
+    ).pack(side="right")
+    win.bind("<Escape>", lambda _event: (close_window(), "break")[1])
+    win.after_idle(lambda: name_field.focus_set())
     win.protocol("WM_DELETE_WINDOW", close_window)
 
 
@@ -5665,10 +6042,10 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     win.title("Merge Existing Record")
     configure_window_geometry(
         win,
-        560,
-        820,
-        min_width=520,
-        min_height=640,
+        640,
+        900,
+        min_width=560,
+        min_height=700,
         margin_x=DEFAULT_MARGIN_X,
         margin_y=DEFAULT_MARGIN_Y,
     )
@@ -5679,7 +6056,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     apply_theme(win)
     scroll_container, scroll_frame = create_scrollable_panel(win)
     scroll_container.pack(fill="both", expand=True)
-    content = ttk.Frame(scroll_frame, padding=20, style="TFrame")
+    content = ttk.Frame(scroll_frame, padding=(18, 16, 18, 18), style="Shell.TFrame")
     content.pack(fill="both", expand=True)
 
     processed_successfully = False
@@ -5705,22 +6082,24 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         except tk.TclError:
             pass
 
-    header = ttk.Frame(content)
+    header = ttk.Frame(content, style="HeaderCard.TFrame", padding=(14, 12))
     header.pack(fill="x", pady=(0, 12))
-    ttk.Label(header, text=f"Pending file: {pending_filename}", style="Subheading.TLabel").pack(anchor="w")
-    header_actions = ttk.Frame(header, style="TFrame")
-    header_actions.pack(anchor="w", pady=(4, 0))
+    ttk.Label(header, text="Merge Existing Record", style="HeaderSubheading.TLabel").pack(anchor="w")
+    ttk.Label(header, text=f"Pending file: {pending_filename}", style="HeaderSubheading.TLabel").pack(anchor="w", pady=(2, 0))
+    header_actions = ttk.Frame(header, style="HeaderCard.TFrame")
+    header_actions.pack(anchor="w", pady=(8, 0))
     ttk.Button(
         header_actions,
         text="Preview Pending",
         width=16,
         command=lambda: preview_specific_pending_pdf(pending_filename),
+        style="Subtle.TButton",
     ).pack(side="left")
     if batch_context:
         ttk.Label(
             header,
             text=f"Batch {batch_context['current']} of {batch_context['total']}",
-            style="Card.TLabel",
+            style="HeaderSubheading.TLabel",
             padding=4,
         ).pack(anchor="w", pady=(4, 0))
         ttk.Button(
@@ -5734,6 +6113,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
                 batch_context=batch_context,
                 cancel_batch_callback=cancel_batch_processing_from_merge,
             ),
+            style="Subtle.TButton",
         ).pack(side="left", padx=(8, 0))
 
     def close_merge_window():
@@ -5753,8 +6133,10 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     status_var = tk.StringVar(value="Active")
     new_year_var = tk.StringVar()
     old_year_var = tk.StringVar()
+    year_hint_var = tk.StringVar(value=_get_year_input_guidance("", ""))
     dest_preview_var = tk.StringVar(value="Select destination folder and fill out fields to preview the final file path.")
     merge_summary_var = tk.StringVar(value="Select an existing PDF to view page counts.")
+    existing_list_hint_var = tk.StringVar(value="Select a destination folder to load existing PDFs.")
     keep_backup_var = keep_backup_preference_var
     folder_path_suggestions = []
     folder_suggestion_entries = []
@@ -5809,6 +6191,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         letter = letter_var.get().strip().upper() or (name[0].upper() if name else "")
         latest = new_year_var.get().strip()
         earliest = old_year_var.get().strip()
+        year_hint_var.set(_get_year_input_guidance(latest, earliest))
 
         if not folder:
             dest_preview_var.set("Select destination folder to preview final path.")
@@ -5847,6 +6230,18 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     new_year_var.trace_add("write", refresh_destination_preview)
     old_year_var.trace_add("write", refresh_destination_preview)
     folder_var.trace_add("write", refresh_destination_preview)
+
+    parsed_pending_metadata = parse_filename_metadata(pending_filename)
+    if parsed_pending_metadata:
+        parsed_name = parsed_pending_metadata.get("name", "").strip()
+        if parsed_name:
+            name_var.set(parsed_name)
+        parsed_latest = parsed_pending_metadata.get("latest", "").strip()
+        parsed_earliest = parsed_pending_metadata.get("earliest", "").strip()
+        if parsed_latest:
+            new_year_var.set(parsed_latest)
+        if parsed_earliest:
+            old_year_var.set(parsed_earliest)
 
     def ensure_folder_under_root(chosen_folder):
         chosen_folder = normalize_path(chosen_folder)
@@ -6077,6 +6472,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         previous_selected = existing_selected_pdf_var.get().strip()
         existing_selected_pdf_var.set("")
         existing_selection_var.set("No file selected")
+        existing_list_hint_var.set("Select a destination folder to load existing PDFs.")
 
         if existing_files_frame is None:
             update_merge_summary()
@@ -6087,20 +6483,25 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
 
         folder = normalize_path(folder_var.get())
         if not folder:
+            existing_list_hint_var.set("Select a destination employee folder to load existing PDFs.")
             update_merge_summary()
             return
         try:
             files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".pdf"))
         except OSError as exc:
             messagebox.showerror("Error", f"Unable to list PDFs: {exc}")
+            existing_list_hint_var.set("Unable to read PDF list. Check folder access and try again.")
             update_merge_summary()
             return
 
         if not files:
             existing_selection_var.set("No PDFs in this folder")
             existing_selected_pdf_var.set("")
+            existing_list_hint_var.set("No PDFs found in this folder. Add files or choose another folder.")
             update_merge_summary()
             return
+
+        existing_list_hint_var.set("Select one PDF to receive pending pages, then confirm Merge and Save.")
 
         if previous_selected in files:
             existing_selected_pdf_var.set(previous_selected)
@@ -6197,10 +6598,12 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         filename = existing_selected_pdf_var.get().strip()
         if not filename:
             existing_selection_var.set("No file selected")
+            existing_list_hint_var.set("Select one PDF to receive pending pages, then confirm Merge and Save.")
             update_merge_summary()
             return
 
         existing_selection_var.set(filename)
+        existing_list_hint_var.set("Selected PDF will receive pending pages first during merge.")
 
         metadata = parse_filename_metadata(filename)
         if metadata:
@@ -6371,11 +6774,11 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         earliest = old_year_var.get().strip()
         try:
             years = _normalize_record_year_inputs(latest, earliest)
-        except ValueError as exc:
-            messagebox.showerror("Error", str(exc))
+        except ValueError:
+            messagebox.showerror("Year Validation", _get_year_input_guidance(latest, earliest), parent=win)
             return None
         if years is None:
-            messagebox.showerror("Error", "Enter at least one year (Latest or Oldest).")
+            messagebox.showerror("Year Validation", _get_year_input_guidance(latest, earliest), parent=win)
             return None
         return years
 
@@ -6527,11 +6930,19 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
                 os.remove(temp_path)
 
     # Folder selection UI
-    folder_frame = ttk.Frame(content, padding=(0, 10))
-    folder_frame.pack(fill="x")
-    ttk.Label(folder_frame, text="Employee Folder:").pack(anchor="w")
+    folder_card = ttk.Frame(content, style="Card.TFrame", padding=14)
+    folder_card.pack(fill="x", pady=(0, 10))
+    ttk.Label(folder_card, text="Destination Employee Folder", style="SectionTitle.TLabel").pack(anchor="w")
+    ttk.Label(
+        folder_card,
+        text="Search by employee name or paste a path under the Records Root Folder.",
+        style="CardMuted.TLabel",
+    ).pack(anchor="w", pady=(2, 8))
 
-    folder_field = ttk.Combobox(folder_frame, textvariable=folder_var, state="normal")
+    folder_row = ttk.Frame(folder_card, style="Card.TFrame")
+    folder_row.pack(fill="x")
+
+    folder_field = ttk.Combobox(folder_row, textvariable=folder_var, state="normal")
     folder_field.pack(side="left", expand=True, fill="x", padx=(0, 8))
     _prevent_combobox_mousewheel_value_change(folder_field)
 
@@ -6554,11 +6965,20 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         lambda selected_value: _apply_folder_input_selection(selected_value),
     )
 
-    ttk.Button(folder_frame, text="Browse", command=select_existing_folder).pack(side="left")
+    ttk.Button(
+        folder_row,
+        text="Browse",
+        command=select_existing_folder,
+        style="Subtle.TButton",
+        width=9,
+    ).pack(side="left")
 
-    ttk.Label(content, text="Existing PDFs in folder:").pack(anchor="w")
-    list_container = ttk.Frame(content, style="Card.TFrame", padding=8)
-    list_container.pack(fill="both", expand=True, pady=(4, 4))
+    existing_list_card = ttk.Frame(content, style="Card.TFrame", padding=10)
+    existing_list_card.pack(fill="both", expand=True, pady=(0, 10))
+    ttk.Label(existing_list_card, text="Existing PDFs in Folder", style="SectionTitle.TLabel").pack(anchor="w", padx=2)
+
+    list_container = ttk.Frame(existing_list_card, style="Card.TFrame", padding=8)
+    list_container.pack(fill="both", expand=True, pady=(6, 4))
 
     existing_canvas = tk.Canvas(
         list_container,
@@ -6585,11 +7005,25 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     existing_canvas.bind("<Configure>", _resize_existing_canvas)
     existing_files_frame.bind("<Configure>", _update_existing_scrollregion)
 
-    ttk.Label(content, textvariable=existing_selection_var, style="Subheading.TLabel").pack(anchor="w", pady=(4, 10))
+    ttk.Label(existing_list_card, textvariable=existing_selection_var, style="CardMuted.TLabel").pack(
+        anchor="w", pady=(6, 8), padx=2
+    )
+    ttk.Label(
+        existing_list_card,
+        textvariable=existing_list_hint_var,
+        style="CardMuted.TLabel",
+        wraplength=560,
+        justify="left",
+    ).pack(anchor="w", pady=(0, 8), padx=2)
 
-    button_frame = ttk.Frame(content)
-    button_frame.pack(pady=5)
-    ttk.Button(button_frame, text="Reload", command=load_existing_pdfs).grid(row=0, column=0, padx=5)
+    button_frame = ttk.Frame(existing_list_card, style="Card.TFrame")
+    button_frame.pack(fill="x", pady=(0, 2))
+    ttk.Button(
+        button_frame,
+        text="Reload List",
+        command=load_existing_pdfs,
+        style="Subtle.TButton",
+    ).grid(row=0, column=0, padx=5)
 
     def open_folder():
         folder = normalize_path(folder_var.get())
@@ -6670,14 +7104,32 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         refresh_destination_preview()
         update_merge_summary()
 
-    ttk.Button(button_frame, text="View Folder", command=open_folder).grid(row=0, column=1, padx=5)
-    ttk.Button(button_frame, text="Rename Folder", command=rename_selected_folder).grid(row=0, column=2, padx=5)
+    ttk.Button(
+        button_frame,
+        text="View Folder",
+        command=open_folder,
+        style="Subtle.TButton",
+    ).grid(row=0, column=1, padx=5)
+    ttk.Button(
+        button_frame,
+        text="Rename Folder",
+        command=rename_selected_folder,
+        style="Subtle.TButton",
+    ).grid(row=0, column=2, padx=5)
 
     # Metadata fields
-    form_frame = ttk.Frame(content, padding=(0, 10))
+    form_frame = ttk.Frame(content, style="Card.TFrame", padding=14)
     form_frame.pack(fill="x")
+    form_frame.columnconfigure(0, weight=1)
+    form_frame.columnconfigure(1, weight=1)
 
-    ttk.Label(form_frame, text="Name:").pack(anchor="w")
+    ttk.Label(form_frame, text="Final Record Details", style="SectionTitle.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w"
+    )
+
+    ttk.Label(form_frame, text="Employee Name", style="FieldLabel.TLabel").grid(
+        row=1, column=0, columnspan=2, sticky="w", pady=(10, 2)
+    )
     merge_name_field = ttk.Combobox(
         form_frame,
         textvariable=name_var,
@@ -6696,45 +7148,99 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         merge_name_field["values"] = get_filtered_name_suggestions(name_var.get())
 
     merge_name_field.configure(postcommand=_refresh_merge_name_choices)
-    merge_name_field.pack(fill="x")
+    merge_name_field.grid(row=2, column=0, columnspan=2, sticky="ew")
 
-    ttk.Label(form_frame, text="Surname First Letter:").pack(anchor="w", pady=(10, 0))
-    ttk.Entry(form_frame, textvariable=letter_var).pack(fill="x")
+    ttk.Label(form_frame, text="Surname Initial", style="FieldLabel.TLabel").grid(
+        row=3, column=0, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(form_frame, textvariable=letter_var).grid(row=4, column=0, sticky="ew", padx=(0, 8))
 
-    ttk.Label(form_frame, text="Status:").pack(anchor="w", pady=(10, 0))
-    ttk.OptionMenu(form_frame, status_var, status_var.get(), "Active", "Retiree").pack(fill="x")
+    ttk.Label(form_frame, text="Status", style="FieldLabel.TLabel").grid(
+        row=3, column=1, sticky="w", pady=(10, 2)
+    )
+    status_field = ttk.Combobox(
+        form_frame,
+        textvariable=status_var,
+        values=("Active", "Retiree"),
+        state="readonly",
+    )
+    _prevent_combobox_mousewheel_value_change(status_field)
+    status_field.grid(row=4, column=1, sticky="ew")
 
-    ttk.Label(form_frame, text="Latest Year (most recent):").pack(anchor="w", pady=(10, 0))
-    ttk.Entry(form_frame, textvariable=new_year_var).pack(fill="x")
+    ttk.Label(form_frame, text="Latest Year", style="FieldLabel.TLabel").grid(
+        row=5, column=0, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(form_frame, textvariable=new_year_var).grid(row=6, column=0, sticky="ew", padx=(0, 8))
 
-    ttk.Label(form_frame, text="Oldest Year (first record):").pack(anchor="w", pady=(10, 0))
-    ttk.Entry(form_frame, textvariable=old_year_var).pack(fill="x")
+    ttk.Label(form_frame, text="Oldest Year", style="FieldLabel.TLabel").grid(
+        row=5, column=1, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(form_frame, textvariable=old_year_var).grid(row=6, column=1, sticky="ew")
+    ttk.Label(
+        form_frame,
+        textvariable=year_hint_var,
+        style="CardMuted.TLabel",
+        wraplength=560,
+        justify="left",
+    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-    ttk.Label(form_frame, text="Final File Preview:").pack(anchor="w", pady=(14,0))
+    ttk.Label(form_frame, text="Final File Preview", style="FieldLabel.TLabel").grid(
+        row=8, column=0, columnspan=2, sticky="w", pady=(10, 2)
+    )
     ttk.Label(
         form_frame,
         textvariable=dest_preview_var,
-        wraplength=480,
+        wraplength=560,
         justify="left",
-        style="Card.TLabel",
+        style="CardMuted.TLabel",
         anchor="w",
-        padding=6,
-    ).pack(fill="x")
+        padding=(0, 6),
+    ).grid(row=9, column=0, columnspan=2, sticky="ew")
 
-    summary_frame = ttk.Frame(form_frame, padding=(0, 10))
-    summary_frame.pack(fill="x")
-    ttk.Label(summary_frame, text="Merge Summary:").pack(anchor="w")
+    ttk.Label(form_frame, text="Merge Summary", style="FieldLabel.TLabel").grid(
+        row=10, column=0, columnspan=2, sticky="w", pady=(10, 2)
+    )
     ttk.Label(
-        summary_frame,
+        form_frame,
         textvariable=merge_summary_var,
-        style="Subheading.TLabel",
-        wraplength=480,
+        style="CardMuted.TLabel",
+        wraplength=560,
         justify="left",
-    ).pack(fill="x", pady=(4, 4))
+        anchor="w",
+    ).grid(row=11, column=0, columnspan=2, sticky="ew")
 
-    action_frame = ttk.Frame(content)
-    action_frame.pack(pady=15)
-    ttk.Button(action_frame, text="Merge & Save", width=20, command=perform_merge, style="Accent.TButton").pack()
+    action_frame = ttk.Frame(content, style="ActionBar.TFrame", padding=(12, 10))
+    action_frame.pack(fill="x", pady=(12, 0))
+    ttk.Label(action_frame, text="Merge Action", style="ActionTitle.TLabel").pack(anchor="w")
+
+    action_buttons = ttk.Frame(action_frame, style="ActionBar.TFrame")
+    action_buttons.pack(fill="x", pady=(6, 0))
+
+    ttk.Button(
+        action_buttons,
+        text="Close",
+        command=close_merge_window,
+        style="SecondaryAction.TButton",
+        width=14,
+    ).pack(side="left")
+    if batch_context:
+        ttk.Button(
+            action_buttons,
+            text="Cancel Batch",
+            command=cancel_batch_processing_from_merge,
+            style="Subtle.TButton",
+            width=14,
+        ).pack(side="left", padx=(8, 0))
+
+    ttk.Button(
+        action_buttons,
+        text="Merge and Save",
+        width=20,
+        command=perform_merge,
+        style="PrimaryAction.TButton",
+    ).pack(side="right")
+    win.bind("<Escape>", lambda _event: (close_merge_window(), "break")[1])
+    win.after_idle(lambda: folder_field.focus_set())
     win.protocol("WM_DELETE_WINDOW", close_merge_window)
 
     refresh_destination_preview()
@@ -6826,10 +7332,10 @@ def employee_details_editor_window():
     win.title("Employee Details Editor")
     configure_window_geometry(
         win,
-        900,
-        760,
-        min_width=720,
-        min_height=560,
+        1080,
+        820,
+        min_width=860,
+        min_height=620,
         margin_x=DEFAULT_MARGIN_X,
         margin_y=DEFAULT_MARGIN_Y,
     )
@@ -6845,6 +7351,7 @@ def employee_details_editor_window():
     folder_name_var = tk.StringVar()
 
     files_count_var = tk.StringVar(value="PDF files: 0")
+    files_empty_hint_var = tk.StringVar(value="Select an employee folder to load PDF files.")
     selected_file_var = tk.StringVar(value="No PDF selected")
     file_name_var = tk.StringVar()
     created_var = tk.StringVar()
@@ -7092,6 +7599,7 @@ def employee_details_editor_window():
         folder = normalize_path(folder_var.get().strip())
         if not folder or not os.path.isdir(folder):
             files_count_var.set("PDF files: 0")
+            files_empty_hint_var.set("Select an employee folder to load PDF files.")
             _clear_file_editor_fields()
             folder_watch_snapshot = ()
             return
@@ -7104,6 +7612,7 @@ def employee_details_editor_window():
             if show_errors:
                 messagebox.showerror("Error", f"Unable to load PDFs: {exc}", parent=win)
             files_count_var.set("PDF files: 0")
+            files_empty_hint_var.set("Unable to read this folder. Check permissions and try again.")
             _clear_file_editor_fields()
             folder_watch_snapshot = None
             return
@@ -7116,8 +7625,11 @@ def employee_details_editor_window():
         files_count_var.set(f"PDF files: {len(pdf_files)}")
 
         if not pdf_files:
+            files_empty_hint_var.set("No PDF files found in this folder.")
             _clear_file_editor_fields()
             return
+
+        files_empty_hint_var.set("Select a PDF to edit filename or timestamp metadata.")
 
         target_name = current_name if current_name in pdf_files else pdf_files[0]
         target_index = pdf_files.index(target_name)
@@ -7553,36 +8065,43 @@ def employee_details_editor_window():
         popup_created_var = tk.StringVar(value=created_var.get().strip() or now_text)
         popup_modified_var = tk.StringVar(value=modified_var.get().strip() or now_text)
 
-        bulk_content = ttk.Frame(bulk_win, padding=14, style="TFrame")
+        bulk_content = ttk.Frame(bulk_win, padding=(14, 12, 14, 14), style="Shell.TFrame")
         bulk_content.pack(fill="both", expand=True)
 
+        header_card = ttk.Frame(bulk_content, style="HeaderCard.TFrame", padding=(12, 10))
+        header_card.pack(fill="x", pady=(0, 10))
         ttk.Label(
-            bulk_content,
+            header_card,
             text="Bulk Date Update by PDF Paths",
-            style="Card.TLabel",
+            style="HeaderSubheading.TLabel",
         ).pack(anchor="w")
         ttk.Label(
-            bulk_content,
+            header_card,
             text=(
                 "Edit Created and Modified date/time below, then paste one path per line. "
                 "Quoted paths are accepted."
             ),
-            style="Subheading.TLabel",
+            style="HeaderSubheading.TLabel",
             wraplength=700,
             justify="left",
-        ).pack(anchor="w", pady=(4, 8))
+        ).pack(anchor="w", pady=(4, 0))
 
-        ttk.Label(bulk_content, text="Created Date:").pack(anchor="w")
-        ttk.Entry(bulk_content, textvariable=popup_created_var).pack(fill="x")
+        fields_card = ttk.Frame(bulk_content, style="Card.TFrame", padding=12)
+        fields_card.pack(fill="x", pady=(0, 8))
+        fields_card.columnconfigure(0, weight=1)
+        fields_card.columnconfigure(1, weight=1)
 
-        ttk.Label(bulk_content, text="Modified Date:").pack(anchor="w", pady=(8, 0))
-        ttk.Entry(bulk_content, textvariable=popup_modified_var).pack(fill="x")
+        ttk.Label(fields_card, text="Created Date", style="FieldLabel.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(fields_card, textvariable=popup_created_var).grid(row=1, column=0, sticky="ew", padx=(0, 8))
+
+        ttk.Label(fields_card, text="Modified Date", style="FieldLabel.TLabel").grid(row=0, column=1, sticky="w")
+        ttk.Entry(fields_card, textvariable=popup_modified_var).grid(row=1, column=1, sticky="ew")
 
         ttk.Label(
-            bulk_content,
+            fields_card,
             text="Date format: YYYY-MM-DD HH:MM[:SS]",
-            style="Subheading.TLabel",
-        ).pack(anchor="w", pady=(6, 8))
+            style="CardMuted.TLabel",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         bulk_paths_container = ttk.Frame(bulk_content, style="Card.TFrame")
         bulk_paths_container.pack(fill="both", expand=True)
@@ -7606,7 +8125,7 @@ def employee_details_editor_window():
             borderwidth=0,
             highlightthickness=1,
             highlightbackground=LISTBOX_BORDER,
-            highlightcolor=ACCENT_COLOR,
+            highlightcolor=FOCUS_RING_COLOR,
             font=("Segoe UI", 9),
             padx=6,
             pady=6,
@@ -7615,13 +8134,17 @@ def employee_details_editor_window():
         bulk_paths_scrollbar.configure(command=popup_bulk_paths_text.yview)
         _mark_widget_as_scroll_list(popup_bulk_paths_text)
 
-        bulk_actions = ttk.Frame(bulk_content, style="TFrame")
+        bulk_actions = ttk.Frame(bulk_content, style="ActionBar.TFrame", padding=(12, 10))
         bulk_actions.pack(fill="x", pady=(10, 0))
+        ttk.Label(bulk_actions, text="Bulk Update Action", style="ActionTitle.TLabel").pack(anchor="w")
+
+        bulk_action_buttons = ttk.Frame(bulk_actions, style="ActionBar.TFrame")
+        bulk_action_buttons.pack(fill="x", pady=(6, 0))
 
         ttk.Button(
-            bulk_actions,
+            bulk_action_buttons,
             text="Apply Dates to Listed Paths",
-            style="Accent.TButton",
+            style="PrimaryAction.TButton",
             command=lambda: _apply_bulk_pdf_timestamps(
                 raw_paths_text=popup_bulk_paths_text.get("1.0", tk.END),
                 parent_window=bulk_win,
@@ -7629,7 +8152,15 @@ def employee_details_editor_window():
                 modified_text=popup_modified_var.get(),
             ),
         ).pack(side="left")
-        ttk.Button(bulk_actions, text="Close", command=bulk_win.destroy).pack(side="right")
+        ttk.Button(
+            bulk_action_buttons,
+            text="Close",
+            command=bulk_win.destroy,
+            style="SecondaryAction.TButton",
+        ).pack(side="right")
+
+        bulk_win.bind("<Escape>", lambda _event: (bulk_win.destroy(), "break")[1])
+        bulk_win.after_idle(lambda: popup_bulk_paths_text.focus_set())
 
     def _preview_selected_pdf():
         folder = normalize_path(folder_var.get().strip())
@@ -7644,49 +8175,112 @@ def employee_details_editor_window():
         except RuntimeError as exc:
             messagebox.showerror("Error", f"Could not open PDF: {exc}", parent=win)
 
-    content_container, content = create_scrollable_panel(win)
-    content_container.pack(fill="both", expand=True)
-    content.configure(style="TFrame", padding=16)
+    content = ttk.Frame(win, style="Shell.TFrame", padding=(16, 14, 16, 16))
+    content.pack(fill="both", expand=True)
 
-    ttk.Label(content, text="Employee Details Editor", style="Card.TLabel").pack(anchor="w")
+    header_card = ttk.Frame(content, style="HeaderCard.TFrame", padding=(14, 12))
+    header_card.pack(fill="x", pady=(0, 12))
+    ttk.Label(header_card, text="Employee Details Editor", style="HeaderSubheading.TLabel").pack(anchor="w")
     ttk.Label(
-        content,
+        header_card,
         text=(
-            "Use this tool to correct employee folder names, move employee status, "
-            "rename PDFs, and edit PDF creation/modified dates."
+            "Manage employee folders and PDF metadata in one screen. "
+            "Choose a folder on the left, then edit PDF details on the right."
         ),
-        style="Subheading.TLabel",
-        wraplength=840,
+        style="HeaderSubheading.TLabel",
+        wraplength=980,
         justify="left",
-    ).pack(anchor="w", pady=(2, 10))
+    ).pack(anchor="w", pady=(4, 0))
 
-    folder_card = ttk.Frame(content, style="Card.TFrame", padding=12)
-    folder_card.pack(fill="x", pady=(0, 12))
+    body_grid = ttk.Frame(content, style="Shell.TFrame")
+    body_grid.pack(fill="both", expand=True)
+    body_grid.columnconfigure(0, weight=4)
+    body_grid.columnconfigure(1, weight=6)
+    body_grid.rowconfigure(0, weight=1)
 
-    ttk.Label(folder_card, text="Employee Folder", style="Card.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
-    folder_field = ttk.Combobox(folder_card, textvariable=folder_var, state="normal")
-    folder_field.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0), padx=(0, 8))
+    left_column = ttk.Frame(body_grid, style="Shell.TFrame")
+    left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+    left_column.columnconfigure(0, weight=1)
+
+    workspace_card = ttk.Frame(left_column, style="Card.TFrame", padding=12)
+    workspace_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+    workspace_card.columnconfigure(0, weight=1)
+    ttk.Label(workspace_card, text="Step 1: Find Employee", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(
+        workspace_card,
+        text="Search an employee folder under the Records Root Folder.",
+        style="CardMuted.TLabel",
+    ).grid(row=1, column=0, sticky="w", pady=(2, 8))
+
+    folder_picker_row = ttk.Frame(workspace_card, style="Card.TFrame")
+    folder_picker_row.grid(row=2, column=0, sticky="ew")
+
+    folder_field = ttk.Combobox(folder_picker_row, textvariable=folder_var, state="normal")
+    folder_field.pack(side="left", fill="x", expand=True, padx=(0, 8))
     _prevent_combobox_mousewheel_value_change(folder_field)
-    ttk.Button(folder_card, text="Browse", command=_browse_employee_folder).grid(row=1, column=2, pady=(6, 0), padx=(0, 8))
-    ttk.Button(folder_card, text="Open Folder", command=_open_selected_folder).grid(row=1, column=3, pady=(6, 0))
+    ttk.Button(
+        folder_picker_row,
+        text="Browse",
+        command=_browse_employee_folder,
+        style="Subtle.TButton",
+    ).pack(side="left", padx=(0, 8))
+    ttk.Button(
+        folder_picker_row,
+        text="Open Folder",
+        command=_open_selected_folder,
+        style="Subtle.TButton",
+    ).pack(side="left")
 
-    ttk.Label(folder_card, text="Employee Name:").grid(row=2, column=0, sticky="w", pady=(10, 0))
-    ttk.Label(folder_card, textvariable=employee_name_var, style="Subheading.TLabel").grid(row=2, column=1, sticky="w", pady=(10, 0))
+    identity_row = ttk.Frame(workspace_card, style="Card.TFrame")
+    identity_row.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+    identity_row.columnconfigure(0, weight=1)
+    identity_row.columnconfigure(1, weight=1)
 
-    ttk.Label(folder_card, text="Folder Name:").grid(row=3, column=0, sticky="w", pady=(10, 0))
-    folder_name_field = ttk.Combobox(folder_card, textvariable=folder_name_var, state="normal")
-    folder_name_field.grid(row=3, column=1, sticky="ew", pady=(10, 0), padx=(0, 8))
+    employee_block = ttk.Frame(identity_row, style="Card.TFrame")
+    employee_block.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+    ttk.Label(employee_block, text="Employee Name", style="FieldLabel.TLabel").pack(anchor="w")
+    ttk.Label(employee_block, textvariable=employee_name_var, style="StatusStrong.TLabel").pack(anchor="w", pady=(2, 0))
+
+    status_block = ttk.Frame(identity_row, style="Card.TFrame")
+    status_block.grid(row=0, column=1, sticky="ew")
+    ttk.Label(status_block, text="Current Status", style="FieldLabel.TLabel").pack(anchor="w")
+    ttk.Label(status_block, textvariable=current_status_var, style="StatusStrong.TLabel").pack(anchor="w", pady=(2, 0))
+
+    folder_ops_card = ttk.Frame(left_column, style="Card.TFrame", padding=12)
+    folder_ops_card.grid(row=1, column=0, sticky="ew")
+    folder_ops_card.columnconfigure(0, weight=1)
+    ttk.Label(folder_ops_card, text="Step 2: Folder Operations", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+
+    ttk.Label(folder_ops_card, text="Rename Employee Folder", style="FieldLabel.TLabel").grid(
+        row=1, column=0, sticky="w", pady=(8, 2)
+    )
+    rename_row = ttk.Frame(folder_ops_card, style="Card.TFrame")
+    rename_row.grid(row=2, column=0, sticky="ew")
+
+    folder_name_field = ttk.Combobox(rename_row, textvariable=folder_name_var, state="normal")
+    folder_name_field.pack(side="left", fill="x", expand=True, padx=(0, 8))
     _prevent_combobox_mousewheel_value_change(folder_name_field)
-    ttk.Button(folder_card, text="Rename Folder", command=_rename_employee_folder).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(10, 0))
+    ttk.Button(
+        rename_row,
+        text="Rename Folder",
+        command=_rename_employee_folder,
+        style="SecondaryAction.TButton",
+    ).pack(side="left")
 
-    ttk.Label(folder_card, text="Current Status:").grid(row=4, column=0, sticky="w", pady=(10, 0))
-    ttk.Label(folder_card, textvariable=current_status_var, style="Subheading.TLabel").grid(row=4, column=1, sticky="w", pady=(10, 0))
-
-    ttk.Label(folder_card, text="Target Status:").grid(row=5, column=0, sticky="w", pady=(10, 0))
-    status_field = ttk.Combobox(folder_card, textvariable=target_status_var, state="readonly")
-    status_field.grid(row=5, column=1, sticky="ew", pady=(10, 0), padx=(0, 8))
+    ttk.Label(folder_ops_card, text="Move Employee Status", style="FieldLabel.TLabel").grid(
+        row=3, column=0, sticky="w", pady=(10, 2)
+    )
+    status_row = ttk.Frame(folder_ops_card, style="Card.TFrame")
+    status_row.grid(row=4, column=0, sticky="ew")
+    status_field = ttk.Combobox(status_row, textvariable=target_status_var, state="readonly")
+    status_field.pack(side="left", fill="x", expand=True, padx=(0, 8))
     _prevent_combobox_mousewheel_value_change(status_field)
-    ttk.Button(folder_card, text="Apply Status", command=_apply_status_change).grid(row=5, column=2, columnspan=2, sticky="ew", pady=(10, 0))
+    ttk.Button(
+        status_row,
+        text="Apply Status",
+        command=_apply_status_change,
+        style="SecondaryAction.TButton",
+    ).pack(side="left")
 
     def _handle_folder_key(event=None):
         _update_folder_combobox_suggestions(folder_field, folder_var.get(), event)
@@ -7714,64 +8308,100 @@ def employee_details_editor_window():
     folder_name_field.bind("<KeyRelease>", _handle_folder_name_key)
     folder_name_field.configure(postcommand=_refresh_folder_name_choices)
 
-    folder_card.columnconfigure(0, weight=0)
-    folder_card.columnconfigure(1, weight=1)
-    folder_card.columnconfigure(2, weight=0)
-    folder_card.columnconfigure(3, weight=0)
+    right_column = ttk.Frame(body_grid, style="Shell.TFrame")
+    right_column.grid(row=0, column=1, sticky="nsew")
 
-    files_card = ttk.Frame(content, style="Card.TFrame", padding=12)
+    files_card = ttk.Frame(right_column, style="Card.TFrame", padding=12)
     files_card.pack(fill="both", expand=True)
 
-    ttk.Label(files_card, textvariable=files_count_var, style="Card.TLabel").pack(anchor="w")
+    ttk.Label(files_card, text="Step 3: PDF Metadata Editor", style="SectionTitle.TLabel").pack(anchor="w")
+    ttk.Label(files_card, textvariable=files_count_var, style="CardMuted.TLabel").pack(anchor="w", pady=(2, 0))
+    ttk.Label(
+        files_card,
+        text="Select a PDF from the list, then edit filename or timestamp metadata.",
+        style="CardMuted.TLabel",
+    ).pack(anchor="w", pady=(0, 6))
 
     files_area = ttk.Frame(files_card, style="Card.TFrame")
     files_area.pack(fill="both", expand=True, pady=(8, 0))
+    files_area.columnconfigure(0, weight=5)
+    files_area.columnconfigure(1, weight=6)
+    files_area.rowconfigure(0, weight=1)
 
-    list_area = ttk.Frame(files_area, style="Card.TFrame")
-    list_area.pack(side="left", fill="both", expand=True, padx=(0, 12))
+    list_area = ttk.Frame(files_area, style="Card.TFrame", padding=(10, 8))
+    list_area.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+    ttk.Label(list_area, text="PDF List", style="FieldLabel.TLabel").pack(anchor="w", pady=(0, 6))
+    ttk.Label(
+        list_area,
+        textvariable=files_empty_hint_var,
+        style="CardMuted.TLabel",
+        wraplength=340,
+        justify="left",
+    ).pack(anchor="w", pady=(0, 6))
 
-    files_scrollbar = ttk.Scrollbar(list_area, orient="vertical")
+    list_body = ttk.Frame(list_area, style="Card.TFrame")
+    list_body.pack(fill="both", expand=True)
+
+    files_scrollbar = ttk.Scrollbar(list_body, orient="vertical")
     files_scrollbar.pack(side="right", fill="y")
 
-    files_listbox = tk.Listbox(list_area, yscrollcommand=files_scrollbar.set)
+    files_listbox = tk.Listbox(list_body, yscrollcommand=files_scrollbar.set)
     _apply_modern_listbox_style(files_listbox, compact=True, export_selection=False)
     files_listbox.pack(side="left", fill="both", expand=True)
     files_scrollbar.configure(command=files_listbox.yview)
     _mark_widget_as_scroll_list(files_listbox)
 
-    editor_area = ttk.Frame(files_area, style="Card.TFrame")
-    editor_area.pack(side="right", fill="both", expand=True)
+    editor_area = ttk.Frame(files_area, style="Card.TFrame", padding=(10, 8))
+    editor_area.grid(row=0, column=1, sticky="nsew")
+    ttk.Label(editor_area, text="Selected PDF Details", style="FieldLabel.TLabel").pack(anchor="w")
+    ttk.Label(editor_area, textvariable=selected_file_var, style="StatusStrong.TLabel", wraplength=420).pack(anchor="w", pady=(2, 0))
 
-    ttk.Label(editor_area, textvariable=selected_file_var, style="Subheading.TLabel", wraplength=360).pack(anchor="w")
-
-    ttk.Label(editor_area, text="File Name:").pack(anchor="w", pady=(10, 0))
+    ttk.Label(editor_area, text="File Name", style="FieldLabel.TLabel").pack(anchor="w", pady=(10, 2))
     ttk.Entry(editor_area, textvariable=file_name_var).pack(fill="x")
 
     file_actions = ttk.Frame(editor_area, style="Card.TFrame")
     file_actions.pack(fill="x", pady=(8, 0))
-    ttk.Button(file_actions, text="Rename File", command=_rename_selected_pdf).pack(side="left")
-    ttk.Button(file_actions, text="Preview", command=_preview_selected_pdf).pack(side="left", padx=(8, 0))
-    ttk.Button(file_actions, text="Bulk Date Update", command=_open_bulk_date_editor_window).pack(side="left", padx=(8, 0))
+    file_actions.columnconfigure(0, weight=1)
+    file_actions.columnconfigure(1, weight=1)
+
+    ttk.Button(
+        file_actions,
+        text="Rename File",
+        command=_rename_selected_pdf,
+        style="Subtle.TButton",
+    ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+    ttk.Button(
+        file_actions,
+        text="Preview",
+        command=_preview_selected_pdf,
+        style="Subtle.TButton",
+    ).grid(row=0, column=1, sticky="ew")
+    ttk.Button(
+        file_actions,
+        text="Bulk Date Update",
+        command=_open_bulk_date_editor_window,
+        style="Subtle.TButton",
+    ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
 
     ttk.Separator(editor_area, orient="horizontal").pack(fill="x", pady=12)
 
-    ttk.Label(editor_area, text="Created Date:").pack(anchor="w")
+    ttk.Label(editor_area, text="Created Date", style="FieldLabel.TLabel").pack(anchor="w")
     ttk.Entry(editor_area, textvariable=created_var).pack(fill="x")
 
-    ttk.Label(editor_area, text="Modified Date:").pack(anchor="w", pady=(10, 0))
+    ttk.Label(editor_area, text="Modified Date", style="FieldLabel.TLabel").pack(anchor="w", pady=(10, 0))
     ttk.Entry(editor_area, textvariable=modified_var).pack(fill="x")
 
     ttk.Label(
         editor_area,
         text="Date format: YYYY-MM-DD HH:MM[:SS]",
-        style="Subheading.TLabel",
+        style="CardMuted.TLabel",
     ).pack(anchor="w", pady=(6, 0))
 
     ttk.Button(
         editor_area,
         text="Apply File Dates",
         command=_apply_selected_pdf_timestamps,
-        style="Accent.TButton",
+        style="PrimaryAction.TButton",
     ).pack(anchor="w", pady=(12, 0))
 
     def _close_employee_details_window():
@@ -7787,9 +8417,14 @@ def employee_details_editor_window():
         if win.winfo_exists():
             win.destroy()
 
-    bottom_actions = ttk.Frame(content, style="TFrame")
-    bottom_actions.pack(fill="x", pady=(12, 0))
-    ttk.Button(bottom_actions, text="Close", command=_close_employee_details_window).pack(side="right")
+    bottom_actions = ttk.Frame(content, style="Shell.TFrame")
+    bottom_actions.pack(fill="x", pady=(8, 0))
+    ttk.Button(
+        bottom_actions,
+        text="Close",
+        command=_close_employee_details_window,
+        style="SecondaryAction.TButton",
+    ).pack(side="right")
 
     files_listbox.bind("<<ListboxSelect>>", lambda _event=None: _refresh_selected_file_details())
 
@@ -7801,6 +8436,8 @@ def employee_details_editor_window():
         folder_watch_after_id = win.after(1200, _poll_folder_file_changes)
     except tk.TclError:
         folder_watch_after_id = None
+    win.bind("<Escape>", lambda _event: (_close_employee_details_window(), "break")[1])
+    win.after_idle(lambda: folder_field.focus_set())
     win.protocol("WM_DELETE_WINDOW", _close_employee_details_window)
 
 
@@ -7867,6 +8504,7 @@ def show_selected_batch_files_window(
                 pass
 
     win.protocol("WM_DELETE_WINDOW", _close_batch_window)
+    win.bind("<Escape>", lambda _event: (_close_batch_window(), "break")[1])
 
     content = ttk.Frame(win, padding=16, style="TFrame")
     content.pack(fill="both", expand=True)
@@ -8137,43 +8775,96 @@ def initialize_settings(progress_callback=None):
 scroll_container, scroll_frame = create_scrollable_panel(root)
 scroll_container.pack(fill="both", expand=True)
 
-main_container = ttk.Frame(scroll_frame, padding=24, style="TFrame")
+main_container = ttk.Frame(scroll_frame, padding=(24, 20, 24, 24), style="Shell.TFrame")
 main_container.pack(fill="both", expand=True)
 
-ttk.Label(main_container, text="PDF Record Manager", style="Title.TLabel").pack(anchor="w")
+header_card = ttk.Frame(main_container, style="HeaderCard.TFrame", padding=(18, 14))
+header_card.pack(fill="x", pady=(0, 14))
+
+header_top_row = ttk.Frame(header_card, style="HeaderCard.TFrame")
+header_top_row.pack(fill="x")
+ttk.Label(header_top_row, text="PDF Record Manager", style="HeaderTitle.TLabel").pack(side="left", anchor="w")
+
+header_status_row = ttk.Frame(header_card, style="HeaderCard.TFrame")
+header_status_row.pack(fill="x", pady=(6, 0))
+ttk.Label(header_status_row, text="Update Status:", style="HeaderSubheading.TLabel").pack(side="left", anchor="w")
+header_status_badge = ttk.Frame(header_status_row, style="StatusBadge.TFrame", padding=(8, 3))
+header_status_badge.pack(side="left", anchor="w", padx=(8, 0))
 ttk.Label(
-    main_container,
+    header_status_badge,
+    textvariable=update_status_var,
+    style="StatusBadge.TLabel",
+).pack(anchor="w")
+
+ttk.Label(
+    header_card,
     text="Review pending scans, create new folders, and merge updates without leaving this window.",
-    style="Subheading.TLabel",
-).pack(anchor="w", pady=(4, 12))
+    style="HeaderSubheading.TLabel",
+    wraplength=760,
+    justify="left",
+).pack(anchor="w", pady=(4, 0))
 
-folders_frame = ttk.Frame(main_container, style="TFrame")
-folders_frame.pack(fill="x", pady=(0, 20))
+content_grid = ttk.Frame(main_container, style="Shell.TFrame")
+content_grid.pack(fill="both", expand=True)
+content_grid.columnconfigure(0, weight=4)
+content_grid.columnconfigure(1, weight=6)
+content_grid.rowconfigure(0, weight=1)
 
-pending_card = ttk.Frame(folders_frame, style="Card.TFrame", padding=16)
-pending_card.pack(side="left", fill="x", expand=True, padx=(0, 12))
-ttk.Label(pending_card, text="Pending Folder", style="Card.TLabel").pack(anchor="w")
-ttk.Entry(pending_card, textvariable=pending_folder).pack(fill="x", pady=(6, 4))
-ttk.Button(pending_card, text="Browse", command=select_pending_folder).pack(anchor="e")
+left_column = ttk.Frame(content_grid, style="Shell.TFrame")
+left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
 
-root_card = ttk.Frame(folders_frame, style="Card.TFrame", padding=16)
-root_card.pack(side="left", fill="x", expand=True)
-ttk.Label(root_card, text="Records Root Folder", style="Card.TLabel").pack(anchor="w")
-ttk.Entry(root_card, textvariable=root_folder).pack(fill="x", pady=(6, 4))
-ttk.Button(root_card, text="Browse", command=select_root_folder).pack(anchor="e")
+right_column = ttk.Frame(content_grid, style="Shell.TFrame")
+right_column.grid(row=0, column=1, sticky="nsew")
 
-names_card = ttk.Frame(main_container, style="Card.TFrame", padding=16)
-names_card.pack(fill="x", pady=(0, 20))
-ttk.Label(names_card, text="Employee Name Sources (PDF / Excel / CSV / TXT)", style="Card.TLabel").pack(anchor="w")
+paths_card = ttk.Frame(left_column, style="Card.TFrame", padding=16)
+paths_card.pack(fill="x", pady=(0, 12))
+ttk.Label(paths_card, text="Workspace Paths", style="SectionTitle.TLabel").pack(anchor="w")
+
+pending_path_row = ttk.Frame(paths_card, style="Card.TFrame")
+pending_path_row.pack(fill="x", pady=(10, 6))
+pending_path_input = ttk.Frame(pending_path_row, style="Card.TFrame")
+pending_path_input.pack(side="left", fill="x", expand=True, padx=(0, 8))
+ttk.Label(pending_path_input, text="Pending Folder", style="FieldLabel.TLabel").pack(anchor="w")
+ttk.Entry(pending_path_input, textvariable=pending_folder).pack(fill="x", pady=(4, 0))
+ttk.Button(
+    pending_path_row,
+    text="Browse",
+    command=select_pending_folder,
+    style="Subtle.TButton",
+    width=9,
+).pack(side="right", anchor="s")
+
+root_path_row = ttk.Frame(paths_card, style="Card.TFrame")
+root_path_row.pack(fill="x")
+root_path_input = ttk.Frame(root_path_row, style="Card.TFrame")
+root_path_input.pack(side="left", fill="x", expand=True, padx=(0, 8))
+ttk.Label(root_path_input, text="Records Root Folder", style="FieldLabel.TLabel").pack(anchor="w")
+ttk.Entry(root_path_input, textvariable=root_folder).pack(fill="x", pady=(4, 0))
+ttk.Button(
+    root_path_row,
+    text="Browse",
+    command=select_root_folder,
+    style="Subtle.TButton",
+    width=9,
+).pack(side="right", anchor="s")
+
+names_card = ttk.Frame(left_column, style="Card.TFrame", padding=16)
+names_card.pack(fill="both", expand=True)
+ttk.Label(names_card, text="Employee Name Sources", style="SectionTitle.TLabel").pack(anchor="w")
+ttk.Label(
+    names_card,
+    text="Supports PDF, Excel, CSV, and TXT source files.",
+    style="CardMuted.TLabel",
+).pack(anchor="w", pady=(2, 8))
 
 employee_sources_container = ttk.Frame(names_card, style="Card.TFrame")
-employee_sources_container.pack(fill="x", pady=(6, 4))
+employee_sources_container.pack(fill="both", expand=True, pady=(6, 4))
 employee_sources_scrollbar = ttk.Scrollbar(employee_sources_container, orient="vertical")
 employee_sources_scrollbar.pack(side="right", fill="y")
 
 employee_sources_listbox = tk.Listbox(
     employee_sources_container,
-    height=4,
+    height=6,
     selectmode="extended",
     yscrollcommand=employee_sources_scrollbar.set,
 )
@@ -8206,7 +8897,7 @@ _refresh_employee_sources_listbox()
 ttk.Label(
     names_card,
     textvariable=employee_sources_selection_count_var,
-    style="Subheading.TLabel",
+    style="CardMuted.TLabel",
     padding=(0, 2),
     anchor="w",
 ).pack(fill="x")
@@ -8215,6 +8906,8 @@ ui_icon_images = _build_pending_toolbar_icon_images()
 
 name_buttons = ttk.Frame(names_card, style="Card.TFrame")
 name_buttons.pack(fill="x", pady=(0, 4))
+name_buttons_container = name_buttons
+
 add_sources_button = ttk.Button(name_buttons, style="ToolbarIcon.TButton", command=select_employee_sources)
 add_sources_button.pack(side="left", padx=(0, 6))
 _configure_icon_button(add_sources_button, "source_add", TOOLBAR_ICON_SOURCE_ADD, "Add Sources")
@@ -8235,23 +8928,26 @@ view_parsed_names_button.pack(side="left", padx=6)
 _configure_icon_button(view_parsed_names_button, "preview", TOOLBAR_ICON_PREVIEW, "View Parsed")
 _attach_hover_tooltip(view_parsed_names_button, "View all parsed employee names")
 
+employee_sources_status_surface = ttk.Frame(names_card, style="StatusSurface.TFrame", padding=(8, 6))
+employee_sources_status_surface.pack(fill="x", pady=(6, 0))
 ttk.Label(
-    names_card,
+    employee_sources_status_surface,
     textvariable=employee_list_status_var,
-    style="Subheading.TLabel",
-    padding=(0, 4),
+    style="StatusSurface.TLabel",
     anchor="w",
-).pack(fill="x", pady=(4, 0))
+    justify="left",
+    wraplength=420,
+).pack(fill="x")
 
-list_card = ttk.Frame(main_container, style="Card.TFrame", padding=18)
+list_card = ttk.Frame(right_column, style="Card.TFrame", padding=16)
 list_card.pack(fill="both", expand=True)
 header_row = ttk.Frame(list_card, style="Card.TFrame")
 header_row.pack(fill="x")
-ttk.Label(header_row, text="Pending Files", style="Card.TLabel").pack(side="left")
-ttk.Label(header_row, textvariable=pending_files_count_var, style="Card.TLabel").pack(side="left", padx=(8, 0))
+ttk.Label(header_row, text="Pending Queue", style="SectionTitle.TLabel").pack(side="left")
+ttk.Label(header_row, textvariable=pending_files_count_var, style="CardMuted.TLabel").pack(side="left", padx=(8, 0))
 
 listbox_container = ttk.Frame(list_card, style="Card.TFrame")
-listbox_container.pack(fill="both", expand=True, pady=(12, 0))
+listbox_container.pack(fill="both", expand=True, pady=(10, 0))
 
 pending_master_row = ttk.Frame(listbox_container, style="Card.TFrame", padding=(6, 2))
 pending_master_row.pack(fill="x", padx=2, pady=(0, 3))
@@ -8324,11 +9020,36 @@ def _update_pending_scrollregion(_event=None):
 pending_canvas.bind("<Configure>", _resize_pending_canvas)
 pending_items_frame.bind("<Configure>", _update_pending_scrollregion)
 
-btn_frame = ttk.Frame(main_container)
-btn_frame.pack(pady=20)
-ttk.Button(btn_frame, text="New Record", width=20, command=start_new_record_batch, style="Accent.TButton").grid(row=0, column=0, padx=8)
-ttk.Button(btn_frame, text="Merge Existing", width=20, command=start_merge_existing_batch).grid(row=0, column=1, padx=8)
-ttk.Button(btn_frame, text="Edit Employee Details", width=22, command=employee_details_editor_window).grid(row=0, column=2, padx=8)
+actions_card = ttk.Frame(main_container, style="ActionBar.TFrame", padding=(16, 12))
+actions_card.pack(fill="x", pady=(14, 0))
+ttk.Label(actions_card, text="Core Operations", style="ActionTitle.TLabel").pack(anchor="w")
+
+btn_frame = ttk.Frame(actions_card, style="ActionBar.TFrame")
+btn_frame.pack(fill="x", pady=(8, 0))
+btn_frame.columnconfigure(0, weight=1)
+btn_frame.columnconfigure(1, weight=1)
+btn_frame.columnconfigure(2, weight=1)
+ttk.Button(
+    btn_frame,
+    text="New Record",
+    width=20,
+    command=start_new_record_batch,
+    style="PrimaryAction.TButton",
+).grid(row=0, column=0, padx=8)
+ttk.Button(
+    btn_frame,
+    text="Merge Existing",
+    width=20,
+    command=start_merge_existing_batch,
+    style="SecondaryAction.TButton",
+).grid(row=0, column=1, padx=8)
+ttk.Button(
+    btn_frame,
+    text="Edit Employee Details",
+    width=22,
+    command=employee_details_editor_window,
+    style="SecondaryAction.TButton",
+).grid(row=0, column=2, padx=8)
 
 def _run_startup_sequence():
     _center_window_to_current_size(root)
