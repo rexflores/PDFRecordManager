@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('application.ico', '.')],
+    datas=[('application.ico', '.'), ('build_info.json', '.')],
     hiddenimports=['pdfplumber', 'openpyxl'],
     hookspath=[],
     hooksconfig={},

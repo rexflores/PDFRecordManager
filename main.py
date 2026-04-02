@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import csv
 import shutil
 import tempfile
 import subprocess
@@ -23,14 +24,16 @@ except ImportError:
 
 PDF_IMPORT_ERROR = ""
 PdfReader = None
+PdfWriter = None
 try:
-    from pypdf import PdfMerger, PdfReader
+    from pypdf import PdfMerger, PdfReader, PdfWriter
 except ImportError as pypdf_error:
     try:
-        from PyPDF2 import PdfMerger, PdfReader  # fallback for older installs
+        from PyPDF2 import PdfMerger, PdfReader, PdfWriter  # fallback for older installs
     except ImportError as pypdf2_error:
         PdfMerger = None
         PdfReader = None
+        PdfWriter = None
         PDF_IMPORT_ERROR = (
             f"pypdf error: {pypdf_error}; PyPDF2 error: {pypdf2_error}"
         )
@@ -79,6 +82,8 @@ TEXT_COLOR = "#E2E8F0"
 SUBTEXT_COLOR = "#94A3B8"
 PENDING_ROW_BG = "#121d31"
 PENDING_ROW_HOVER_BG = "#1a2a45"
+PENDING_ROW_SELECTED_BG = "#27456f"
+PENDING_ROW_SELECTED_HOVER_BG = "#2f5487"
 PENDING_ROW_TEXT = "#e5edff"
 LISTBOX_BG = "#101a2b"
 LISTBOX_BORDER = "#2f405d"
@@ -86,16 +91,16 @@ LISTBOX_TEXT = "#e5ecf8"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.1.0"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
+APP_BUILD_INFO_FILENAME = "build_info.json"
 DEFAULT_UPDATE_MANIFEST_URL = ""
 UPDATE_CHECK_TIMEOUT_SEC = 8
 TOOLBAR_ICON_SIZE = 20
 TOOLBAR_ICON_COLOR = "#FFFFFF"
 TOOLBAR_ICON_STROKE_MULTIPLIER = 1.55
 TOOLBAR_ICON_RENDER_SCALE = 6
-TOOLBAR_ICON_REFRESH = "\u21bb"
 TOOLBAR_ICON_PREVIEW = "\u25c9"
 TOOLBAR_ICON_SELECT_ALL = "\u2611"
 TOOLBAR_ICON_SELECT_NONE = "\u2610"
@@ -104,6 +109,15 @@ TOOLBAR_ICON_SOURCE_ADD = "\u2795"
 TOOLBAR_ICON_SOURCE_REMOVE = "\u2796"
 TOOLBAR_ICON_SOURCE_CLEAR = "\u2715"
 TOOLBAR_ICON_EDIT = "\u270e"
+TOOLBAR_ICON_ROTATE = "\u21ba"
+
+ROTATION_PREVIEW_DEFAULT_WIDTH = 1080
+ROTATION_PREVIEW_DEFAULT_HEIGHT = 740
+ROTATION_PREVIEW_MIN_WIDTH = 760
+ROTATION_PREVIEW_MIN_HEIGHT = 520
+ROTATION_PREVIEW_THUMB_MIN_WIDTH = 110
+ROTATION_PREVIEW_THUMB_MAX_WIDTH = 180
+ROTATION_PREVIEW_THUMB_MAX_LIMIT = 320
 
 
 def _find_app_icon_path():
@@ -212,6 +226,16 @@ def apply_theme(window):
         relief="flat",
     )
     style.configure(
+        "PendingRowSelected.TFrame",
+        background=PENDING_ROW_SELECTED_BG,
+        relief="flat",
+    )
+    style.configure(
+        "PendingRowSelectedHover.TFrame",
+        background=PENDING_ROW_SELECTED_HOVER_BG,
+        relief="flat",
+    )
+    style.configure(
         "PendingFile.TLabel",
         background=PENDING_ROW_BG,
         foreground=PENDING_ROW_TEXT,
@@ -222,6 +246,18 @@ def apply_theme(window):
         background=PENDING_ROW_HOVER_BG,
         foreground=PENDING_ROW_TEXT,
         font=("Segoe UI", 10),
+    )
+    style.configure(
+        "PendingFileSelected.TLabel",
+        background=PENDING_ROW_SELECTED_BG,
+        foreground=PENDING_ROW_TEXT,
+        font=("Segoe UI Semibold", 10),
+    )
+    style.configure(
+        "PendingFileSelectedHover.TLabel",
+        background=PENDING_ROW_SELECTED_HOVER_BG,
+        foreground=PENDING_ROW_TEXT,
+        font=("Segoe UI Semibold", 10),
     )
     style.configure(
         "PendingFile.TCheckbutton",
@@ -245,6 +281,30 @@ def apply_theme(window):
     style.map(
         "PendingFileHover.TCheckbutton",
         background=[("active", PENDING_ROW_HOVER_BG), ("selected", PENDING_ROW_HOVER_BG)],
+        foreground=[("disabled", SUBTEXT_COLOR)],
+    )
+    style.configure(
+        "PendingFileSelected.TCheckbutton",
+        background=PENDING_ROW_SELECTED_BG,
+        foreground=PENDING_ROW_TEXT,
+        font=("Segoe UI Semibold", 10),
+        padding=(2, 0),
+    )
+    style.map(
+        "PendingFileSelected.TCheckbutton",
+        background=[("active", PENDING_ROW_SELECTED_HOVER_BG), ("selected", PENDING_ROW_SELECTED_BG)],
+        foreground=[("disabled", SUBTEXT_COLOR)],
+    )
+    style.configure(
+        "PendingFileSelectedHover.TCheckbutton",
+        background=PENDING_ROW_SELECTED_HOVER_BG,
+        foreground=PENDING_ROW_TEXT,
+        font=("Segoe UI Semibold", 10),
+        padding=(2, 0),
+    )
+    style.map(
+        "PendingFileSelectedHover.TCheckbutton",
+        background=[("active", PENDING_ROW_SELECTED_HOVER_BG), ("selected", PENDING_ROW_SELECTED_HOVER_BG)],
         foreground=[("disabled", SUBTEXT_COLOR)],
     )
     style.configure(
@@ -890,6 +950,115 @@ def _find_scroll_canvas_for_widget(widget):
     return None
 
 
+_COMBOBOX_POPDOWN_SENTINEL = "__combobox_popdown__"
+
+
+def _register_combobox_for_popdown_guard(combobox):
+    tracked = getattr(root, "_combobox_popdown_guard_widgets", None)
+    if tracked is None:
+        tracked = []
+        root._combobox_popdown_guard_widgets = tracked
+
+    if combobox in tracked:
+        return
+
+    tracked.append(combobox)
+
+    def _remove_combobox(_event=None):
+        active = getattr(root, "_combobox_popdown_guard_widgets", None)
+        if not active:
+            return
+        try:
+            active.remove(combobox)
+        except ValueError:
+            pass
+
+    combobox.bind("<Destroy>", _remove_combobox, add="+")
+
+
+def _is_combobox_popdown_visible(combobox):
+    try:
+        popdown_name = str(
+            combobox.tk.call("ttk::combobox::PopdownWindow", str(combobox))
+        )
+    except tk.TclError:
+        return False
+
+    if not popdown_name:
+        return False
+
+    try:
+        return bool(int(combobox.tk.call("winfo", "ismapped", popdown_name)))
+    except (tk.TclError, ValueError, TypeError):
+        return False
+
+
+def _any_combobox_popdown_visible():
+    tracked = getattr(root, "_combobox_popdown_guard_widgets", None)
+    if not tracked:
+        return False
+
+    live_widgets = []
+    for widget in tracked:
+        try:
+            if not widget.winfo_exists():
+                continue
+        except Exception:
+            continue
+
+        live_widgets.append(widget)
+        if _is_combobox_popdown_visible(widget):
+            if len(live_widgets) != len(tracked):
+                root._combobox_popdown_guard_widgets = live_widgets
+            return True
+
+    if len(live_widgets) != len(tracked):
+        root._combobox_popdown_guard_widgets = live_widgets
+    return False
+
+
+def _hide_visible_combobox_popdowns():
+    tracked = getattr(root, "_combobox_popdown_guard_widgets", None)
+    if not tracked:
+        return False
+
+    closed_any = False
+    live_widgets = []
+
+    for widget in tracked:
+        try:
+            if not widget.winfo_exists():
+                continue
+        except Exception:
+            continue
+
+        live_widgets.append(widget)
+        if not _is_combobox_popdown_visible(widget):
+            continue
+
+        closed = False
+        try:
+            widget.tk.call("ttk::combobox::Unpost", str(widget))
+            closed = True
+        except tk.TclError:
+            pass
+
+        if not closed:
+            try:
+                widget.event_generate("<Escape>")
+                closed = True
+            except tk.TclError:
+                pass
+
+        if closed:
+            closed_any = True
+
+    if len(live_widgets) != len(tracked):
+        root._combobox_popdown_guard_widgets = live_widgets
+
+    return closed_any
+
+
 def _get_pointer_widget_safely(x_root, y_root):
     try:
         widget_name = root.tk.call("winfo", "containing", x_root, y_root)
@@ -904,7 +1073,7 @@ def _get_pointer_widget_safely(x_root, y_root):
     # ttk Combobox dropdown widgets ("popdown") are not normal Tkinter children.
     # Let native handling consume wheel events there instead of forcing routing.
     if ".popdown" in widget_name or widget_name.endswith("popdown"):
-        return None
+        return _COMBOBOX_POPDOWN_SENTINEL
 
     try:
         return root.nametowidget(widget_name)
@@ -922,6 +1091,12 @@ def _dispatch_global_mousewheel(event):
         x_root, y_root = root.winfo_pointerxy()
 
     target_widget = _get_pointer_widget_safely(x_root, y_root)
+
+    if target_widget == _COMBOBOX_POPDOWN_SENTINEL:
+        return None
+
+    _hide_visible_combobox_popdowns()
+
     if target_widget is None:
         return None
 
@@ -1162,10 +1337,14 @@ show_text_with_icons_var = tk.BooleanVar(value=False)
 employee_sources_listbox = None
 employee_source_paths = []
 employee_list_status_var = tk.StringVar(value="No employee sources selected.")
+employee_sources_selection_count_var = tk.StringVar(value="Selected: 0/0")
 employee_name_suggestions = []
-pending_files_count_var = tk.StringVar(value="(0)")
+pending_files_count_var = tk.StringVar(value="(0 selected / 0 total)")
 name_filter_mode = tk.StringVar(value="strict")
 _suppress_name_filter_refresh = False
+rotation_preview_window_width = ROTATION_PREVIEW_DEFAULT_WIDTH
+rotation_preview_window_height = ROTATION_PREVIEW_DEFAULT_HEIGHT
+rotation_preview_thumb_width = ROTATION_PREVIEW_THUMB_MAX_WIDTH
 
 tray_notifier = SystemTrayNotifier()
 tray_status_var = tk.StringVar()
@@ -1837,10 +2016,24 @@ def load_employee_name_suggestions(progress_callback=None):
 
 def _refresh_employee_sources_listbox():
     if employee_sources_listbox is None:
+        employee_sources_selection_count_var.set("Selected: 0/0")
         return
     employee_sources_listbox.delete(0, tk.END)
     for path in employee_source_paths:
         employee_sources_listbox.insert(tk.END, os.path.basename(path))
+    _refresh_employee_sources_selection_count()
+
+
+def _refresh_employee_sources_selection_count(_event=None):
+    if employee_sources_listbox is None or not employee_sources_listbox.winfo_exists():
+        employee_sources_selection_count_var.set("Selected: 0/0")
+        return
+
+    total_count = int(employee_sources_listbox.size())
+    selected_count = len(employee_sources_listbox.curselection())
+    employee_sources_selection_count_var.set(
+        f"Selected: {selected_count}/{total_count}"
+    )
 
 
 def _set_employee_sources(paths, persist=False, progress_callback=None):
@@ -1894,18 +2087,114 @@ def get_filtered_name_suggestions(prefix):
 def _get_suggestion_popup_state(combobox):
     state = getattr(combobox, "_suggestion_popup_state", None)
     if state is None:
-        state = {"popup": None, "listbox": None}
+        state = {"popup": None, "listbox": None, "tracker_after_id": None}
         setattr(combobox, "_suggestion_popup_state", state)
     return state
 
 
 def _hide_suggestion_popup(combobox):
     state = _get_suggestion_popup_state(combobox)
+    tracker_after_id = state.get("tracker_after_id")
+    if tracker_after_id is not None:
+        try:
+            combobox.after_cancel(tracker_after_id)
+        except tk.TclError:
+            pass
+    state["tracker_after_id"] = None
+
     popup = state.get("popup")
     if popup is not None and popup.winfo_exists():
         popup.destroy()
     state["popup"] = None
     state["listbox"] = None
+
+
+def _scroll_list_widget_from_event(scroll_widget, event=None):
+    if scroll_widget is None or not scroll_widget.winfo_exists():
+        return "break"
+
+    if event is None:
+        return "break"
+
+    if hasattr(event, "delta") and event.delta:
+        steps = int(-1 * (event.delta / 120))
+        if steps != 0:
+            scroll_widget.yview_scroll(steps, "units")
+        return "break"
+
+    event_num = getattr(event, "num", None)
+    if event_num == 4:
+        scroll_widget.yview_scroll(-1, "units")
+        return "break"
+    if event_num == 5:
+        scroll_widget.yview_scroll(1, "units")
+        return "break"
+    return "break"
+
+
+def _position_suggestion_popup(combobox):
+    state = _get_suggestion_popup_state(combobox)
+    popup = state.get("popup")
+    listbox = state.get("listbox")
+    if (
+        popup is None
+        or not popup.winfo_exists()
+        or listbox is None
+        or not listbox.winfo_exists()
+        or not combobox.winfo_exists()
+    ):
+        return False
+
+    try:
+        combobox.update_idletasks()
+        popup.update_idletasks()
+    except tk.TclError:
+        return False
+
+    visible_rows = max(1, int(listbox.cget("height")))
+    popup_width = max(combobox.winfo_width(), 320)
+    popup_height = min(240, (visible_rows * 22) + 6)
+
+    x_pos = combobox.winfo_rootx()
+    y_pos = combobox.winfo_rooty() + combobox.winfo_height()
+    screen_w = combobox.winfo_screenwidth()
+    screen_h = combobox.winfo_screenheight()
+
+    if x_pos + popup_width > screen_w - 8:
+        x_pos = max(0, screen_w - popup_width - 8)
+    if y_pos + popup_height > screen_h - 8:
+        y_pos = max(0, combobox.winfo_rooty() - popup_height)
+
+    popup.geometry(f"{popup_width}x{popup_height}+{x_pos}+{y_pos}")
+    popup.deiconify()
+    popup.lift()
+    return True
+
+
+def _start_suggestion_popup_tracking(combobox, interval_ms=40):
+    state = _get_suggestion_popup_state(combobox)
+
+    existing_after_id = state.get("tracker_after_id")
+    if existing_after_id is not None:
+        try:
+            combobox.after_cancel(existing_after_id)
+        except tk.TclError:
+            pass
+        state["tracker_after_id"] = None
+
+    def _track_position():
+        if not _position_suggestion_popup(combobox):
+            state["tracker_after_id"] = None
+            return
+        try:
+            state["tracker_after_id"] = combobox.after(interval_ms, _track_position)
+        except tk.TclError:
+            state["tracker_after_id"] = None
+
+    try:
+        state["tracker_after_id"] = combobox.after(interval_ms, _track_position)
+    except tk.TclError:
+        state["tracker_after_id"] = None
 
 
 def _select_suggestion_from_popup(combobox, _event=None):
@@ -2010,11 +2299,28 @@ def _show_suggestion_popup(combobox, suggestions):
 
         listbox = tk.Listbox(list_container)
         _apply_modern_listbox_style(listbox, compact=True, export_selection=False)
+        _mark_widget_as_scroll_list(listbox)
         popup_scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=listbox.yview)
         listbox.configure(yscrollcommand=popup_scrollbar.set)
 
         listbox.pack(side="left", fill="both", expand=True)
         popup_scrollbar.pack(side="right", fill="y")
+
+        def _scroll_suggestion_list(event=None):
+            return _scroll_list_widget_from_event(listbox, event)
+
+        popup.bind("<MouseWheel>", _scroll_suggestion_list, add="+")
+        popup.bind("<Button-4>", _scroll_suggestion_list, add="+")
+        popup.bind("<Button-5>", _scroll_suggestion_list, add="+")
+        list_container.bind("<MouseWheel>", _scroll_suggestion_list, add="+")
+        list_container.bind("<Button-4>", _scroll_suggestion_list, add="+")
+        list_container.bind("<Button-5>", _scroll_suggestion_list, add="+")
+        listbox.bind("<MouseWheel>", _scroll_suggestion_list, add="+")
+        listbox.bind("<Button-4>", _scroll_suggestion_list, add="+")
+        listbox.bind("<Button-5>", _scroll_suggestion_list, add="+")
+        popup_scrollbar.bind("<MouseWheel>", _scroll_suggestion_list, add="+")
+        popup_scrollbar.bind("<Button-4>", _scroll_suggestion_list, add="+")
+        popup_scrollbar.bind("<Button-5>", _scroll_suggestion_list, add="+")
 
         listbox.bind("<Button-1>", lambda event: _select_suggestion_from_popup(combobox, event))
         listbox.bind("<Double-Button-1>", lambda event: _select_suggestion_from_popup(combobox, event))
@@ -2045,25 +2351,8 @@ def _show_suggestion_popup(combobox, suggestions):
     visible_rows = min(8, max(1, len(limited_suggestions)))
     listbox.configure(height=visible_rows)
 
-    combobox.update_idletasks()
-    popup.update_idletasks()
-
-    popup_width = max(combobox.winfo_width(), 320)
-    popup_height = min(240, (visible_rows * 22) + 6)
-
-    x_pos = combobox.winfo_rootx()
-    y_pos = combobox.winfo_rooty() + combobox.winfo_height()
-    screen_w = combobox.winfo_screenwidth()
-    screen_h = combobox.winfo_screenheight()
-
-    if x_pos + popup_width > screen_w - 8:
-        x_pos = max(0, screen_w - popup_width - 8)
-    if y_pos + popup_height > screen_h - 8:
-        y_pos = max(0, combobox.winfo_rooty() - popup_height)
-
-    popup.geometry(f"{popup_width}x{popup_height}+{x_pos}+{y_pos}")
-    popup.deiconify()
-    popup.lift()
+    _position_suggestion_popup(combobox)
+    _start_suggestion_popup_tracking(combobox)
 
 
 def _update_combobox_suggestions(combobox, query_text, event=None):
@@ -2084,9 +2373,17 @@ def _update_combobox_suggestions(combobox, query_text, event=None):
 
 
 def _prevent_combobox_mousewheel_value_change(combobox):
+    _register_combobox_for_popdown_guard(combobox)
+
     def _on_wheel(event=None):
+        state = _get_suggestion_popup_state(combobox)
+        listbox = state.get("listbox")
+        if listbox is not None and listbox.winfo_exists():
+            return _scroll_list_widget_from_event(listbox, event)
+
         if event is not None:
             _dispatch_global_mousewheel(event)
+
         return "break"
 
     combobox.bind("<MouseWheel>", _on_wheel, add="+")
@@ -2140,9 +2437,120 @@ def _get_installation_scope():
     return "portable"
 
 
+_about_build_metadata_cache = None
+
+
+def _normalize_build_metadata_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return "unknown"
+    if text.lower() in {"unknown", "none", "null", "n/a"}:
+        return "unknown"
+    return text
+
+
+def _candidate_build_info_paths():
+    paths = []
+
+    if getattr(sys, "frozen", False):
+        bundle_dir = getattr(sys, "_MEIPASS", None)
+        if bundle_dir:
+            paths.append(os.path.join(bundle_dir, APP_BUILD_INFO_FILENAME))
+        paths.append(os.path.join(os.path.dirname(sys.executable), APP_BUILD_INFO_FILENAME))
+
+    paths.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), APP_BUILD_INFO_FILENAME))
+
+    deduped_paths = []
+    seen_paths = set()
+    for candidate_path in paths:
+        normalized_path = os.path.normcase(os.path.normpath(candidate_path))
+        if normalized_path in seen_paths:
+            continue
+        seen_paths.add(normalized_path)
+        deduped_paths.append(candidate_path)
+
+    return deduped_paths
+
+
+def _read_build_info_file():
+    for info_path in _candidate_build_info_paths():
+        if not os.path.isfile(info_path):
+            continue
+
+        try:
+            with open(info_path, "r", encoding="utf-8") as info_file:
+                data = json.load(info_file)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+
+    return {}
+
+
+def _run_git_text_command(command):
+    kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "check": False,
+        "cwd": os.path.dirname(os.path.abspath(__file__)),
+    }
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if create_no_window:
+        kwargs["creationflags"] = create_no_window
+
+    try:
+        result = subprocess.run(command, **kwargs)
+    except Exception:
+        return ""
+
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _resolve_about_build_metadata():
+    global _about_build_metadata_cache
+    if _about_build_metadata_cache is not None:
+        return _about_build_metadata_cache
+
+    commit_value = _normalize_build_metadata_value(APP_BUILD_COMMIT)
+    date_value = _normalize_build_metadata_value(APP_BUILD_DATE)
+
+    if commit_value == "unknown" or date_value == "unknown":
+        build_info = _read_build_info_file()
+        if commit_value == "unknown":
+            commit_value = _normalize_build_metadata_value(
+                build_info.get("commit") or build_info.get("build_commit")
+            )
+        if date_value == "unknown":
+            date_value = _normalize_build_metadata_value(
+                build_info.get("build_date") or build_info.get("date")
+            )
+
+    if not getattr(sys, "frozen", False):
+        if commit_value == "unknown":
+            commit_value = _normalize_build_metadata_value(
+                _run_git_text_command(["git", "rev-parse", "--short=12", "HEAD"])
+            )
+        if date_value == "unknown":
+            date_value = _normalize_build_metadata_value(
+                _run_git_text_command(["git", "show", "-s", "--format=%cI", "HEAD"])
+            )
+
+    _about_build_metadata_cache = {
+        "commit": commit_value,
+        "build_date": date_value,
+    }
+    return _about_build_metadata_cache
+
+
 def _get_about_date_text():
-    if APP_BUILD_DATE and APP_BUILD_DATE != "unknown":
-        return APP_BUILD_DATE
+    metadata = _resolve_about_build_metadata()
+    resolved_date = metadata.get("build_date", "unknown")
+    if resolved_date != "unknown":
+        return resolved_date
 
     target_path = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)
     try:
@@ -2153,6 +2561,7 @@ def _get_about_date_text():
 
 
 def show_about_dialog():
+    build_metadata = _resolve_about_build_metadata()
     os_name = os.environ.get("OS") or platform.system() or "unknown"
     architecture = platform.machine() or "unknown"
     os_version = platform.version() or "unknown"
@@ -2162,7 +2571,7 @@ def show_about_dialog():
         "App: PDF Record Manager",
         f"Version: {APP_VERSION}",
         f"Install Type: {_get_installation_scope()}",
-        f"Build Commit: {APP_BUILD_COMMIT}",
+        f"Build Commit: {build_metadata.get('commit', 'unknown')}",
         f"Build Date: {_get_about_date_text()}",
         f"Update Feed: {update_feed_value}",
         f"Python Runtime: {platform.python_version()}",
@@ -2301,6 +2710,7 @@ def check_for_updates(manual=False):
 
 def load_settings(progress_callback=None):
     global _suppress_name_filter_refresh
+    global rotation_preview_window_width, rotation_preview_window_height, rotation_preview_thumb_width
 
     if not os.path.exists(CONFIG_PATH):
         if progress_callback is not None:
@@ -2329,6 +2739,18 @@ def load_settings(progress_callback=None):
         "show_text_with_icons",
         data.get("pending_toolbar_text_labels", show_text_with_icons_var.get()),
     )
+    rotation_preview_width_value = data.get(
+        "rotation_preview_window_width",
+        rotation_preview_window_width,
+    )
+    rotation_preview_height_value = data.get(
+        "rotation_preview_window_height",
+        rotation_preview_window_height,
+    )
+    rotation_preview_thumb_value = data.get(
+        "rotation_preview_thumb_width",
+        rotation_preview_thumb_width,
+    )
 
     if pending_value:
         pending_folder.set(normalize_path(pending_value))
@@ -2347,6 +2769,28 @@ def load_settings(progress_callback=None):
     tray_notifications_enabled_var.set(bool(tray_notifications_value))
     show_text_with_icons_var.set(bool(show_text_with_icons_value))
 
+    try:
+        parsed_rotation_width = int(rotation_preview_width_value)
+        if parsed_rotation_width >= ROTATION_PREVIEW_MIN_WIDTH:
+            rotation_preview_window_width = parsed_rotation_width
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed_rotation_height = int(rotation_preview_height_value)
+        if parsed_rotation_height >= ROTATION_PREVIEW_MIN_HEIGHT:
+            rotation_preview_window_height = parsed_rotation_height
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed_thumb_width = int(rotation_preview_thumb_value)
+        parsed_thumb_width = max(ROTATION_PREVIEW_THUMB_MIN_WIDTH, parsed_thumb_width)
+        parsed_thumb_width = min(ROTATION_PREVIEW_THUMB_MAX_LIMIT, parsed_thumb_width)
+        rotation_preview_thumb_width = parsed_thumb_width
+    except (TypeError, ValueError):
+        pass
+
     _set_employee_sources(sources_value or [], persist=False, progress_callback=progress_callback)
     _update_icon_button_labels()
     _refresh_update_status()
@@ -2362,6 +2806,9 @@ def save_settings():
         "auto_refresh_pending_files": auto_refresh_var.get(),
         "tray_notifications_enabled": tray_notifications_enabled_var.get(),
         "show_text_with_icons": show_text_with_icons_var.get(),
+        "rotation_preview_window_width": rotation_preview_window_width,
+        "rotation_preview_window_height": rotation_preview_window_height,
+        "rotation_preview_thumb_width": rotation_preview_thumb_width,
     }
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as config_file:
@@ -2429,6 +2876,190 @@ def _ensure_pdf_merger_available():
         if PDF_IMPORT_ERROR:
             message += f"\nDetails: {PDF_IMPORT_ERROR}"
         raise RuntimeError(message)
+
+
+def _ensure_pdf_rotation_available():
+    if PdfReader is None or PdfWriter is None:
+        message = (
+            "PDF rotation requires pypdf/PyPDF2 with PdfWriter support. "
+            "Install with 'pip install pypdf'."
+        )
+        if PDF_IMPORT_ERROR:
+            message += f"\nDetails: {PDF_IMPORT_ERROR}"
+        raise RuntimeError(message)
+
+
+def _create_pdf_page_thumbnail(pdf_page, max_width=ROTATION_PREVIEW_THUMB_MAX_WIDTH):
+    if Image is None:
+        return None
+
+    try:
+        page_image = pdf_page.to_image(resolution=90)
+        pil_image = page_image.original.convert("RGB")
+    except Exception:
+        return None
+
+    width, height = pil_image.size
+    if width <= 0 or height <= 0:
+        return None
+
+    if width > max_width:
+        target_height = max(1, int((max_width / float(width)) * height))
+        resample_filter = _get_pillow_lanczos_filter()
+        if resample_filter is not None:
+            pil_image = pil_image.resize((max_width, target_height), resample_filter)
+        else:
+            pil_image = pil_image.resize((max_width, target_height))
+
+    return pil_image
+
+
+def _build_pdf_thumbnail_photo(pil_image, max_width=ROTATION_PREVIEW_THUMB_MAX_WIDTH):
+    if pil_image is None or ImageTk is None:
+        return None
+
+    image_to_render = pil_image
+    width, height = image_to_render.size
+    if width <= 0 or height <= 0:
+        return None
+
+    if width > max_width:
+        target_height = max(1, int((max_width / float(width)) * height))
+        resample_filter = _get_pillow_lanczos_filter()
+        if resample_filter is not None:
+            image_to_render = image_to_render.resize((max_width, target_height), resample_filter)
+        else:
+            image_to_render = image_to_render.resize((max_width, target_height))
+
+    return ImageTk.PhotoImage(image_to_render)
+
+
+def _rotate_pdf_pages_in_place(
+    file_path,
+    degrees=None,
+    pages_to_rotate=None,
+    page_rotation_map=None,
+):
+    _ensure_pdf_rotation_available()
+
+    normalized_rotation_map = {}
+    if page_rotation_map is not None:
+        for raw_page_index, raw_rotation in dict(page_rotation_map).items():
+            try:
+                page_index = int(raw_page_index)
+                if page_index < 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            try:
+                rotation_value = int(raw_rotation) % 360
+            except (TypeError, ValueError):
+                continue
+
+            if rotation_value % 90 != 0:
+                raise ValueError("Rotation angle must be a multiple of 90 degrees.")
+            if rotation_value == 0:
+                continue
+
+            normalized_rotation_map[page_index] = rotation_value
+    else:
+        if degrees is None:
+            raise ValueError("Rotation angle is required when page_rotation_map is not provided.")
+
+        normalized_degrees = int(degrees)
+        if normalized_degrees % 90 != 0:
+            raise ValueError("Rotation angle must be a multiple of 90 degrees.")
+
+        normalized_degrees = normalized_degrees % 360
+        if normalized_degrees == 0:
+            return 0
+
+        if pages_to_rotate is None:
+            selected_page_indexes = None
+        else:
+            selected_page_indexes = {
+                int(page_index)
+                for page_index in pages_to_rotate
+                if int(page_index) >= 0
+            }
+            if not selected_page_indexes:
+                return 0
+
+        if selected_page_indexes is None:
+            normalized_rotation_map = None
+        else:
+            normalized_rotation_map = {
+                page_index: normalized_degrees for page_index in selected_page_indexes
+            }
+
+    try:
+        reader = PdfReader(file_path)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to read PDF: {exc}") from exc
+
+    writer = PdfWriter()
+    rotated_pages = 0
+
+    for page_index, page in enumerate(reader.pages):
+        if normalized_rotation_map is None:
+            page_rotation = normalized_degrees
+        else:
+            page_rotation = normalized_rotation_map.get(page_index, 0)
+
+        if page_rotation:
+            try:
+                rotated_page = page.rotate(page_rotation)
+            except Exception:
+                rotated_page = page
+                try:
+                    rotated_page = page.rotate_clockwise(page_rotation)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Unable to rotate page {page_index + 1}: {exc}"
+                    ) from exc
+
+            writer.add_page(rotated_page)
+            rotated_pages += 1
+        else:
+            writer.add_page(page)
+
+    metadata = getattr(reader, "metadata", None)
+    if metadata:
+        try:
+            cleaned_metadata = {
+                str(key): str(value)
+                for key, value in dict(metadata).items()
+                if key and value is not None
+            }
+            if cleaned_metadata:
+                writer.add_metadata(cleaned_metadata)
+        except Exception:
+            pass
+
+    temp_output_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            suffix=".pdf",
+            dir=os.path.dirname(file_path) or None,
+        ) as temp_output:
+            temp_output_path = temp_output.name
+            writer.write(temp_output)
+
+        shutil.move(temp_output_path, file_path)
+        temp_output_path = None
+    except Exception as exc:
+        raise RuntimeError(f"Unable to write rotated PDF: {exc}") from exc
+    finally:
+        if temp_output_path and os.path.exists(temp_output_path):
+            try:
+                os.remove(temp_output_path)
+            except OSError:
+                pass
+
+    return rotated_pages
 
 
 def get_pdf_page_count(pdf_path):
@@ -2888,10 +3519,72 @@ def show_parsed_names_window():
     for name in employee_name_suggestions:
         names_listbox.insert(tk.END, name)
 
-    ttk.Button(content, text="Close", command=win.destroy).pack(anchor="e", pady=(12, 0))
+    def export_parsed_names():
+        names_to_export = [str(name).strip() for name in employee_name_suggestions if str(name).strip()]
+        if not names_to_export:
+            messagebox.showwarning("Export Parsed Names", "There are no parsed names to export.", parent=win)
+            return
+
+        target_path = filedialog.asksaveasfilename(
+            parent=win,
+            title="Export Parsed Names",
+            initialfile="parsed_names.txt",
+            defaultextension=".txt",
+            filetypes=[
+                ("Text Files", "*.txt"),
+                ("CSV Files", "*.csv"),
+                ("JSON Files", "*.json"),
+                ("All Files", "*.*"),
+            ],
+        )
+        if not target_path:
+            return
+
+        output_path = normalize_path(target_path)
+        _, extension = os.path.splitext(output_path)
+        extension = extension.lower()
+
+        if extension not in {".txt", ".csv", ".json"}:
+            output_path = output_path + ".txt"
+            extension = ".txt"
+
+        try:
+            if extension == ".csv":
+                with open(output_path, "w", newline="", encoding="utf-8") as output_file:
+                    writer = csv.writer(output_file)
+                    writer.writerow(["Name"])
+                    for parsed_name in names_to_export:
+                        writer.writerow([parsed_name])
+            elif extension == ".json":
+                with open(output_path, "w", encoding="utf-8") as output_file:
+                    json.dump(names_to_export, output_file, indent=2, ensure_ascii=False)
+            else:
+                with open(output_path, "w", encoding="utf-8") as output_file:
+                    output_file.write("\n".join(names_to_export))
+
+            messagebox.showinfo(
+                "Export Parsed Names",
+                f"Exported {len(names_to_export)} parsed name(s) to:\n{output_path}",
+                parent=win,
+            )
+        except OSError as exc:
+            messagebox.showerror(
+                "Export Parsed Names",
+                f"Unable to export parsed names:\n{exc}",
+                parent=win,
+            )
+
+    actions = ttk.Frame(content, style="TFrame")
+    actions.pack(fill="x", pady=(12, 0))
+
+    ttk.Button(actions, text="Export", command=export_parsed_names, style="Accent.TButton").pack(side="left")
+    ttk.Button(actions, text="Close", command=win.destroy).pack(side="right")
         
 pending_items_frame = None
+pending_canvas_widget = None
 pending_file_vars = {}
+pending_file_order = []
+pending_selection_anchor_filename = None
 pending_snapshot = set()
 auto_refresh_job_id = None
 ui_icon_images = {}
@@ -2900,7 +3593,7 @@ add_sources_button = None
 remove_sources_button = None
 clear_sources_button = None
 view_parsed_names_button = None
-pending_refresh_button = None
+pending_rotate_button = None
 pending_preview_button = None
 pending_master_toggle_button = None
 pending_master_selection_state = "none"
@@ -3037,7 +3730,7 @@ def _update_icon_button_labels():
         (remove_sources_button, "source_remove", TOOLBAR_ICON_SOURCE_REMOVE, "Remove Selected"),
         (clear_sources_button, "clear_selection", TOOLBAR_ICON_SOURCE_CLEAR, "Clear All"),
         (view_parsed_names_button, "preview", TOOLBAR_ICON_PREVIEW, "View Parsed"),
-        (pending_refresh_button, "refresh", TOOLBAR_ICON_REFRESH, "Refresh"),
+        (pending_rotate_button, "refresh", TOOLBAR_ICON_ROTATE, "Rotate"),
         (pending_preview_button, "preview", TOOLBAR_ICON_PREVIEW, "Preview"),
     )
     for button, icon_name, fallback_icon, label in button_specs:
@@ -3143,14 +3836,158 @@ def _set_all_pending_file_selections(selected):
     _refresh_pending_master_toggle_state()
 
 
+def _set_pending_selection_state(selected_names):
+    global _pending_selection_update_in_progress
+
+    selected_lookup = set(selected_names or [])
+    if not pending_file_vars:
+        _refresh_pending_master_toggle_state()
+        return
+
+    _pending_selection_update_in_progress = True
+    try:
+        for file_name, var in pending_file_vars.items():
+            var.set(file_name in selected_lookup)
+    finally:
+        _pending_selection_update_in_progress = False
+
+    _refresh_pending_master_toggle_state()
+
+
+def _get_selected_pending_file_names_set():
+    return {name for name, var in pending_file_vars.items() if var.get()}
+
+
+def _is_pending_ctrl_pressed(event):
+    return bool(int(getattr(event, "state", 0)) & 0x0004)
+
+
+def _is_pending_shift_pressed(event):
+    return bool(int(getattr(event, "state", 0)) & 0x0001)
+
+
+def _select_pending_range_to(target_filename, additive=False):
+    global pending_selection_anchor_filename
+
+    if target_filename not in pending_file_vars:
+        return
+
+    ordered_names = [name for name in pending_file_order if name in pending_file_vars]
+    if not ordered_names:
+        ordered_names = list(pending_file_vars.keys())
+    if target_filename not in ordered_names:
+        return
+
+    anchor_filename = pending_selection_anchor_filename
+    if anchor_filename not in ordered_names:
+        anchor_filename = target_filename
+        pending_selection_anchor_filename = target_filename
+
+    start_index = ordered_names.index(anchor_filename)
+    end_index = ordered_names.index(target_filename)
+    left = min(start_index, end_index)
+    right = max(start_index, end_index)
+    range_selection = set(ordered_names[left : right + 1])
+
+    if additive:
+        selected_names = _get_selected_pending_file_names_set()
+        selected_names.update(range_selection)
+    else:
+        selected_names = range_selection
+
+    _set_pending_selection_state(selected_names)
+
+
+def _focus_pending_selection_surface():
+    if pending_canvas_widget is None:
+        return
+    try:
+        if pending_canvas_widget.winfo_exists():
+            pending_canvas_widget.focus_set()
+    except Exception:
+        pass
+
+
+def _handle_pending_item_click(event=None, target_filename=None):
+    global pending_selection_anchor_filename
+
+    if not target_filename or target_filename not in pending_file_vars:
+        return "break"
+
+    _focus_pending_selection_surface()
+
+    ctrl_pressed = _is_pending_ctrl_pressed(event)
+    shift_pressed = _is_pending_shift_pressed(event)
+
+    if shift_pressed:
+        _select_pending_range_to(target_filename, additive=ctrl_pressed)
+    elif ctrl_pressed:
+        selected_names = _get_selected_pending_file_names_set()
+        if target_filename in selected_names:
+            selected_names.remove(target_filename)
+        else:
+            selected_names.add(target_filename)
+        _set_pending_selection_state(selected_names)
+        pending_selection_anchor_filename = target_filename
+    else:
+        _set_pending_selection_state({target_filename})
+        pending_selection_anchor_filename = target_filename
+
+    return "break"
+
+
+def _is_widget_in_pending_list(widget):
+    if widget is None:
+        return False
+
+    try:
+        widget_path = str(widget)
+    except Exception:
+        return False
+
+    for candidate in (pending_canvas_widget, pending_items_frame):
+        if candidate is None:
+            continue
+        try:
+            if not candidate.winfo_exists():
+                continue
+            candidate_path = str(candidate)
+        except Exception:
+            continue
+
+        if widget_path == candidate_path or widget_path.startswith(candidate_path + "."):
+            return True
+
+    return False
+
+
+def _on_pending_ctrl_select_all(event=None):
+    global pending_selection_anchor_filename
+
+    if event is not None and not _is_widget_in_pending_list(getattr(event, "widget", None)):
+        return None
+
+    if not pending_file_vars:
+        _refresh_pending_master_toggle_state()
+        return "break"
+
+    _set_all_pending_file_selections(True)
+    if pending_file_order:
+        pending_selection_anchor_filename = pending_file_order[0]
+
+    _focus_pending_selection_surface()
+    return "break"
+
+
 def _refresh_pending_master_toggle_state():
     global pending_master_selection_state
+
+    total_count, selected_count = _get_pending_selection_counts()
+    pending_files_count_var.set(f"({selected_count} selected / {total_count} total)")
 
     if pending_master_toggle_button is None or not pending_master_toggle_button.winfo_exists():
         pending_master_selection_state = "none"
         return
-
-    total_count, selected_count = _get_pending_selection_counts()
 
     if total_count == 0:
         pending_master_selection_state = "none"
@@ -3199,7 +4036,17 @@ def _format_pending_filename_for_display(filename, max_length=62):
 
 
 def _set_pending_row_hover_state(row_widget, name_label, check_widget, hovered):
-    if hovered:
+    selected = bool(getattr(check_widget, "_pending_selected", False))
+
+    if selected and hovered:
+        row_widget.configure(style="PendingRowSelectedHover.TFrame")
+        name_label.configure(style="PendingFileSelectedHover.TLabel")
+        check_widget.configure(style="PendingFileSelectedHover.TCheckbutton")
+    elif selected:
+        row_widget.configure(style="PendingRowSelected.TFrame")
+        name_label.configure(style="PendingFileSelected.TLabel")
+        check_widget.configure(style="PendingFileSelected.TCheckbutton")
+    elif hovered:
         row_widget.configure(style="PendingRowHover.TFrame")
         name_label.configure(style="PendingFileHover.TLabel")
         check_widget.configure(style="PendingFileHover.TCheckbutton")
@@ -3215,13 +4062,17 @@ def _ensure_auto_refresh_job():
 
 
 def _set_pending_files_count(count):
-    pending_files_count_var.set(f"({max(0, int(count))})")
+    total_count = max(0, int(count))
+    pending_files_count_var.set(f"(0 selected / {total_count} total)")
 
 
 def load_pending_files():
     global pending_file_vars, pending_row_preview_buttons
+    global pending_file_order, pending_selection_anchor_filename
     if pending_items_frame is None:
         pending_row_preview_buttons = []
+        pending_file_order = []
+        pending_selection_anchor_filename = None
         _set_pending_files_count(0)
         _refresh_pending_master_toggle_state()
         _set_pending_snapshot()
@@ -3235,6 +4086,8 @@ def load_pending_files():
     folder = normalize_path(pending_folder.get())
     if not folder:
         pending_file_vars = {}
+        pending_file_order = []
+        pending_selection_anchor_filename = None
         _set_pending_files_count(0)
         _refresh_pending_master_toggle_state()
         _set_pending_snapshot()
@@ -3245,17 +4098,25 @@ def load_pending_files():
     except OSError as exc:
         messagebox.showerror("Error", f"Unable to load pending PDFs: {exc}")
         pending_file_vars = {}
+        pending_file_order = []
+        pending_selection_anchor_filename = None
         _set_pending_files_count(0)
         _refresh_pending_master_toggle_state()
         _set_pending_snapshot()
         return
 
     _set_pending_files_count(len(files))
+    pending_file_order = list(files)
 
     previous_state = {name: var.get() for name, var in pending_file_vars.items()}
     pending_file_vars = {}
 
+    if pending_selection_anchor_filename not in pending_file_order:
+        pending_selection_anchor_filename = None
+
     if not files:
+        pending_file_order = []
+        pending_selection_anchor_filename = None
         _set_pending_snapshot()
         _refresh_pending_master_toggle_state()
         ttk.Label(
@@ -3280,6 +4141,7 @@ def load_pending_files():
 
         checkbutton = ttk.Checkbutton(row, variable=var, style="PendingFile.TCheckbutton")
         checkbutton.pack(side="left", padx=(2, 8))
+        checkbutton._pending_selected = bool(var.get())
 
         display_name = _format_pending_filename_for_display(filename)
         name_label = ttk.Label(row, text=display_name, style="PendingFile.TLabel", anchor="w")
@@ -3288,23 +4150,50 @@ def load_pending_files():
         if display_name != filename:
             _attach_hover_tooltip(name_label, filename)
 
-        def _toggle_row_selection(_event=None, target_var=var):
-            target_var.set(not target_var.get())
-            return "break"
+        def _on_pending_item_click(_event=None, target_filename=filename):
+            return _handle_pending_item_click(_event, target_filename)
 
-        def _on_row_enter(_event=None, target_row=row, target_label=name_label, target_check=checkbutton):
-            _set_pending_row_hover_state(target_row, target_label, target_check, True)
+        hover_state = {"value": False}
 
-        def _on_row_leave(_event=None, target_row=row, target_label=name_label, target_check=checkbutton):
-            _set_pending_row_hover_state(target_row, target_label, target_check, False)
+        def _apply_row_visual(
+            target_row=row,
+            target_label=name_label,
+            target_check=checkbutton,
+            target_var=var,
+            target_hover_state=hover_state,
+        ):
+            target_check._pending_selected = bool(target_var.get())
+            _set_pending_row_hover_state(
+                target_row,
+                target_label,
+                target_check,
+                target_hover_state["value"],
+            )
 
-        name_label.bind("<Button-1>", _toggle_row_selection, add="+")
+        def _on_row_selection_changed(
+            *_args,
+            target_apply_row_visual=_apply_row_visual,
+        ):
+            target_apply_row_visual()
+
+        def _on_row_enter(_event=None, target_hover_state=hover_state, target_apply_row_visual=_apply_row_visual):
+            target_hover_state["value"] = True
+            target_apply_row_visual()
+
+        def _on_row_leave(_event=None, target_hover_state=hover_state, target_apply_row_visual=_apply_row_visual):
+            target_hover_state["value"] = False
+            target_apply_row_visual()
+
+        var.trace_add("write", _on_row_selection_changed)
+
+        for click_widget in (row, name_label, checkbutton):
+            click_widget.bind("<Button-1>", _on_pending_item_click, add="+")
 
         for hover_widget in (row, name_label, checkbutton):
             hover_widget.bind("<Enter>", _on_row_enter, add="+")
             hover_widget.bind("<Leave>", _on_row_leave, add="+")
 
-        _set_pending_row_hover_state(row, name_label, checkbutton, False)
+        _apply_row_visual()
 
         preview_button = ttk.Button(
             row,
@@ -3318,6 +4207,13 @@ def load_pending_files():
         _configure_icon_button(preview_button, "preview", TOOLBAR_ICON_PREVIEW, "Preview")
         pending_row_preview_buttons.append(preview_button)
 
+    if pending_selection_anchor_filename is None:
+        for file_name in pending_file_order:
+            var = pending_file_vars.get(file_name)
+            if var is not None and var.get():
+                pending_selection_anchor_filename = file_name
+                break
+
     _refresh_pending_master_toggle_state()
 
 def preview_selected_pdf():
@@ -3328,6 +4224,1087 @@ def preview_selected_pdf():
 
     for filename in selected:
         preview_specific_pending_pdf(filename)
+
+
+def rotate_selected_pending_pdfs(
+    selected_file_infos_override=None,
+    window_title="Rotate Pending PDFs",
+    post_save_callback=None,
+    parent_window=None,
+):
+    global rotation_preview_window_width, rotation_preview_window_height, rotation_preview_thumb_width
+
+    selected_file_infos = []
+    missing_files = []
+
+    if selected_file_infos_override is None:
+        selected = get_selected_pending_files()
+        if not selected:
+            messagebox.showwarning("Warning", "Select at least one pending PDF using the checkboxes.")
+            return
+
+        pending_dir = normalize_path(pending_folder.get())
+        if not pending_dir:
+            messagebox.showwarning("Warning", "Select the pending folder first.")
+            return
+        if not os.path.isdir(pending_dir):
+            messagebox.showerror("Error", "The pending folder no longer exists.")
+            return
+
+        for filename in selected:
+            file_path = normalize_path(os.path.join(pending_dir, filename))
+            if not os.path.exists(file_path):
+                missing_files.append(filename)
+                continue
+            selected_file_infos.append(
+                {
+                    "name": filename,
+                    "path": file_path,
+                    "page_count": 0,
+                }
+            )
+    else:
+        for file_info in list(selected_file_infos_override):
+            if isinstance(file_info, dict):
+                raw_path = file_info.get("path", "")
+                file_path = normalize_path(raw_path)
+                filename = str(file_info.get("name") or os.path.basename(file_path or ""))
+            else:
+                file_path = normalize_path(str(file_info))
+                filename = os.path.basename(file_path)
+
+            if not file_path or not os.path.exists(file_path):
+                missing_files.append(filename or "(missing file)")
+                continue
+
+            selected_file_infos.append(
+                {
+                    "name": filename,
+                    "path": file_path,
+                    "page_count": 0,
+                }
+            )
+
+    try:
+        _ensure_pdf_rotation_available()
+    except RuntimeError as exc:
+        messagebox.showerror("Rotate PDF", str(exc))
+        return
+
+    if missing_files:
+        preview = ", ".join(missing_files[:3])
+        suffix = "" if len(missing_files) <= 3 else ", ..."
+        messagebox.showwarning(
+            "Missing Files",
+            f"Some selected files were skipped because they no longer exist:\n{preview}{suffix}",
+        )
+
+    if not selected_file_infos:
+        messagebox.showerror("Rotate PDF", "None of the selected PDFs are available.")
+        if selected_file_infos_override is None:
+            load_pending_files()
+        return
+
+    owner_window = root
+    if parent_window is not None:
+        try:
+            if parent_window.winfo_exists():
+                owner_window = parent_window
+        except Exception:
+            pass
+
+    win = tk.Toplevel(owner_window)
+    _apply_app_icon(win)
+    win.title(window_title)
+    configure_window_geometry(
+        win,
+        rotation_preview_window_width,
+        rotation_preview_window_height,
+        min_width=ROTATION_PREVIEW_MIN_WIDTH,
+        min_height=ROTATION_PREVIEW_MIN_HEIGHT,
+        margin_x=DEFAULT_MARGIN_X,
+        margin_y=DEFAULT_MARGIN_Y,
+    )
+    win.transient(owner_window)
+    win.lift()
+    win.focus_force()
+    apply_theme(win)
+
+    def _remember_rotation_window_size(event=None):
+        global rotation_preview_window_width, rotation_preview_window_height
+        if event is not None and event.widget is not win:
+            return
+        if not win.winfo_exists():
+            return
+
+        width = max(ROTATION_PREVIEW_MIN_WIDTH, int(win.winfo_width()))
+        height = max(ROTATION_PREVIEW_MIN_HEIGHT, int(win.winfo_height()))
+        rotation_preview_window_width = width
+        rotation_preview_window_height = height
+
+    def _close_rotation_window():
+        global rotation_preview_thumb_width
+        try:
+            _remember_rotation_window_size()
+            try:
+                rotation_preview_thumb_width = int(float(thumbnail_size_var.get()))
+                rotation_preview_thumb_width = max(ROTATION_PREVIEW_THUMB_MIN_WIDTH, rotation_preview_thumb_width)
+                rotation_preview_thumb_width = min(ROTATION_PREVIEW_THUMB_MAX_LIMIT, rotation_preview_thumb_width)
+            except Exception:
+                pass
+            save_settings()
+        except Exception:
+            pass
+        if win.winfo_exists():
+            win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", _close_rotation_window)
+    win.bind("<Configure>", _remember_rotation_window_size, add="+")
+
+    status_var = tk.StringVar(value="Preparing page previews...")
+    backup_before_rotate_var = tk.BooleanVar(value=True)
+    initial_thumb_width = rotation_preview_thumb_width
+    if initial_thumb_width < ROTATION_PREVIEW_THUMB_MIN_WIDTH or initial_thumb_width > ROTATION_PREVIEW_THUMB_MAX_LIMIT:
+        initial_thumb_width = ROTATION_PREVIEW_THUMB_MAX_WIDTH
+    thumbnail_size_var = tk.IntVar(value=int(initial_thumb_width))
+
+    selected_row_paths = set()
+    selected_pages_by_file = {}
+    row_state_by_file = {}
+    page_entries_by_file = {}
+    page_entries = []
+    row_widgets = []
+    active_row_path = selected_file_infos[0]["path"] if selected_file_infos else None
+    row_selection_anchor_path = active_row_path
+    page_selection_anchor_by_file = {}
+    selection_context = "rows"
+    total_loaded_pages = 0
+    preview_error_count = 0
+
+    CTRL_MASK = 0x0004
+    SHIFT_MASK = 0x0001
+
+    row_bg_normal = BG_COLOR
+    row_bg_active = "#17253c"
+    row_border_normal = LISTBOX_BORDER
+    row_border_selected = ACCENT_COLOR
+    page_bg_normal = "#111a2b"
+    page_bg_selected = "#1e3a67"
+    page_border_normal = LISTBOX_BORDER
+    page_border_selected = ACCENT_COLOR
+
+    content = ttk.Frame(win, padding=14, style="TFrame")
+    content.pack(fill="both", expand=True)
+
+    ttk.Label(
+        content,
+        text="Batch PDF Rotation",
+        style="Card.TLabel",
+    ).pack(anchor="w")
+    ttk.Label(
+        content,
+        text=(
+            "PDF24-like selection: click a row/page to focus, Ctrl+Click to multi-select rows/pages, "
+            "Shift+Click to span-select between start and end, "
+            "Ctrl+A for all in current context, Shift+Scroll over a row to scroll that row's pages, "
+            "Ctrl+Scroll over pages to resize preview size."
+        ),
+        style="Subheading.TLabel",
+        wraplength=1000,
+        justify="left",
+    ).pack(anchor="w", pady=(2, 10))
+
+    controls = ttk.Frame(content, style="Card.TFrame")
+    controls.pack(fill="x", pady=(0, 8))
+
+    ttk.Label(controls, text="Page Size:").pack(side="left")
+    page_size_scale = ttk.Scale(
+        controls,
+        from_=ROTATION_PREVIEW_THUMB_MIN_WIDTH,
+        to=ROTATION_PREVIEW_THUMB_MAX_LIMIT,
+        orient="horizontal",
+        length=220,
+        variable=thumbnail_size_var,
+    )
+    page_size_scale.pack(side="left", padx=(8, 6))
+
+    page_size_value_label = ttk.Label(controls, text=f"{thumbnail_size_var.get()} px", style="Subheading.TLabel")
+    page_size_value_label.pack(side="left", padx=(0, 12))
+
+    ttk.Checkbutton(
+        controls,
+        text="Create Backup",
+        variable=backup_before_rotate_var,
+    ).pack(side="right")
+
+    rotate_actions = ttk.Frame(content, style="TFrame")
+    rotate_actions.pack(fill="x", pady=(0, 8))
+
+    rotate_left_button = ttk.Button(rotate_actions, text="Rotate Left 90\N{DEGREE SIGN}", style="Accent.TButton")
+    rotate_left_button.pack(side="left")
+
+    rotate_right_button = ttk.Button(rotate_actions, text="Rotate Right 90\N{DEGREE SIGN}", style="Accent.TButton")
+    rotate_right_button.pack(side="left", padx=(8, 0))
+
+    save_rotation_button = ttk.Button(
+        rotate_actions,
+        text="Save Rotation",
+        style="Accent.TButton",
+    )
+    save_rotation_button.pack(side="left", padx=(12, 0))
+
+    ttk.Button(rotate_actions, text="Close", command=_close_rotation_window).pack(side="right")
+
+    ttk.Label(content, textvariable=status_var, style="Subheading.TLabel").pack(anchor="w", pady=(0, 8))
+
+    preview_area = ttk.Frame(content, style="Card.TFrame", padding=8)
+    preview_area.pack(fill="both", expand=True)
+
+    preview_hscrollbar = ttk.Scrollbar(preview_area, orient="horizontal")
+    preview_hscrollbar.pack(side="bottom", fill="x")
+
+    preview_canvas = tk.Canvas(
+        preview_area,
+        highlightthickness=0,
+        bg=BG_COLOR,
+        bd=0,
+    )
+    preview_canvas.pack(side="left", fill="both", expand=True)
+
+    preview_scrollbar = ttk.Scrollbar(preview_area, orient="vertical", command=preview_canvas.yview)
+    preview_scrollbar.pack(side="right", fill="y")
+    preview_canvas.configure(
+        yscrollcommand=preview_scrollbar.set,
+        xscrollcommand=preview_hscrollbar.set,
+    )
+    preview_hscrollbar.configure(command=preview_canvas.xview)
+
+    _mark_widget_as_scroll_canvas(preview_canvas)
+    _ensure_global_mousewheel_binding()
+
+    preview_cards_frame = ttk.Frame(preview_canvas, style="Card.TFrame")
+    preview_cards_window_id = preview_canvas.create_window((0, 0), window=preview_cards_frame, anchor="nw")
+    preview_cards_frame.columnconfigure(0, weight=1)
+
+    def _update_preview_scrollregion(_event=None):
+        preview_canvas.configure(scrollregion=preview_canvas.bbox("all"))
+
+    def _sync_preview_cards_width(_event=None):
+        try:
+            preview_canvas.itemconfigure(
+                preview_cards_window_id,
+                width=max(1, int(preview_canvas.winfo_width())),
+            )
+        except tk.TclError:
+            return
+        _update_preview_scrollregion()
+
+    preview_canvas.bind("<Configure>", _sync_preview_cards_width, add="+")
+    preview_cards_frame.bind("<Configure>", _update_preview_scrollregion)
+
+    def _is_ctrl_pressed(event):
+        return bool(int(getattr(event, "state", 0)) & CTRL_MASK)
+
+    def _is_shift_pressed(event):
+        return bool(int(getattr(event, "state", 0)) & SHIFT_MASK)
+
+    def _ordered_selected_row_paths():
+        ordered = []
+        for info in selected_file_infos:
+            file_path = info["path"]
+            if file_path in selected_row_paths:
+                ordered.append(file_path)
+        return ordered
+
+    def _ordered_display_row_paths():
+        ordered = []
+        for info in selected_file_infos:
+            file_path = info["path"]
+            if file_path in row_state_by_file:
+                ordered.append(file_path)
+        return ordered
+
+    def _clear_page_selections_except(file_path):
+        for existing_file_path, page_indexes in selected_pages_by_file.items():
+            if existing_file_path != file_path and page_indexes:
+                page_indexes.clear()
+
+    def _apply_row_span_selection(anchor_file_path, end_file_path, additive=False):
+        ordered_paths = _ordered_display_row_paths()
+        if not ordered_paths or end_file_path not in ordered_paths:
+            return
+
+        if anchor_file_path not in ordered_paths:
+            anchor_file_path = end_file_path
+
+        start_index = ordered_paths.index(anchor_file_path)
+        end_index = ordered_paths.index(end_file_path)
+        left = min(start_index, end_index)
+        right = max(start_index, end_index)
+        span_selection = set(ordered_paths[left : right + 1])
+
+        if additive:
+            selected_row_paths.update(span_selection)
+        else:
+            selected_row_paths.clear()
+            selected_row_paths.update(span_selection)
+
+    def _apply_page_span_selection(file_path, anchor_page_index, end_page_index, additive=False):
+        entries = page_entries_by_file.get(file_path, [])
+        if not entries:
+            return
+
+        max_page_index = max(entry["page_index"] for entry in entries)
+        start_page_index = max(0, min(int(anchor_page_index), max_page_index))
+        target_page_index = max(0, min(int(end_page_index), max_page_index))
+
+        left = min(start_page_index, target_page_index)
+        right = max(start_page_index, target_page_index)
+        span_selection = set(range(left, right + 1))
+
+        selected_pages = selected_pages_by_file.setdefault(file_path, set())
+        if additive:
+            selected_pages.update(span_selection)
+        else:
+            selected_pages.clear()
+            selected_pages.update(span_selection)
+
+    def _row_has_unsaved_changes(file_path):
+        for entry in page_entries_by_file.get(file_path, []):
+            if int(entry.get("rotation_degrees", 0)) % 360:
+                return True
+        return False
+
+    def _count_unsaved_files():
+        return sum(1 for info in selected_file_infos if _row_has_unsaved_changes(info["path"]))
+
+    def _count_selected_pages_total():
+        return sum(len(indexes) for indexes in selected_pages_by_file.values())
+
+    def _set_status(message=None):
+        if message:
+            status_var.set(message)
+            return
+        row_total = len(row_state_by_file)
+        row_selected = sum(1 for path in selected_row_paths if path in row_state_by_file)
+        unsaved_files = _count_unsaved_files()
+        selected_pages_total = _count_selected_pages_total()
+        status_var.set(
+            f"Loaded {total_loaded_pages} page(s). Selected rows: {row_selected}/{row_total}. "
+            f"Selected pages: {selected_pages_total}. Unsaved files: {unsaved_files}."
+        )
+
+    def _collect_rotation_changes_by_file():
+        rotation_map = {}
+        for entry in page_entries:
+            page_rotation = int(entry.get("rotation_degrees", 0)) % 360
+            if page_rotation == 0:
+                continue
+
+            file_path = entry["file_path"]
+            rotation_map.setdefault(file_path, {})[entry["page_index"]] = page_rotation
+        return rotation_map
+
+    def _update_row_header(file_path):
+        row_state = row_state_by_file.get(file_path)
+        if not row_state:
+            return
+
+        file_info = row_state["file_info"]
+        page_count = int(file_info.get("page_count", 0))
+        has_unsaved = _row_has_unsaved_changes(file_path)
+        selected_pages_count = len(selected_pages_by_file.get(file_path, set()))
+
+        suffix = " *" if has_unsaved else ""
+        page_word = "page" if page_count == 1 else "pages"
+        if selected_pages_count > 0:
+            detail = f" ({page_count} {page_word}, selected pages: {selected_pages_count})"
+        else:
+            detail = f" ({page_count} {page_word})"
+
+        row_state["header_label"].configure(text=f"{file_info['name']}{suffix}{detail}")
+
+    def _update_row_visual(file_path):
+        row_state = row_state_by_file.get(file_path)
+        if not row_state:
+            return
+
+        is_selected_row = file_path in selected_row_paths
+        is_active_row = file_path == active_row_path
+
+        row_bg = row_bg_active if is_active_row else row_bg_normal
+        row_border = row_border_selected if is_selected_row else row_border_normal
+
+        row_state["row_frame"].configure(
+            bg=row_bg,
+            highlightbackground=row_border,
+            highlightcolor=row_border,
+        )
+        row_state["header_label"].configure(bg=row_bg)
+        row_state["pages_canvas"].configure(bg=row_bg)
+        row_state["pages_inner"].configure(bg=row_bg)
+
+    def _update_page_visual(entry):
+        file_path = entry["file_path"]
+        page_index = entry["page_index"]
+        is_selected_page = page_index in selected_pages_by_file.get(file_path, set())
+
+        if is_selected_page:
+            page_bg = page_bg_selected
+            page_border = page_border_selected
+        else:
+            page_bg = page_bg_normal
+            page_border = page_border_normal
+
+        entry["card_frame"].configure(
+            bg=page_bg,
+            highlightbackground=page_border,
+            highlightcolor=page_border,
+        )
+
+        for widget in entry.get("bg_widgets", []):
+            try:
+                widget.configure(bg=page_bg)
+            except tk.TclError:
+                pass
+
+    def _refresh_all_row_visuals():
+        for info in selected_file_infos:
+            file_path = info["path"]
+            _update_row_header(file_path)
+            _update_row_visual(file_path)
+            for entry in page_entries_by_file.get(file_path, []):
+                _update_page_visual(entry)
+
+    def _select_all_rows():
+        nonlocal active_row_path, row_selection_anchor_path, selection_context
+        selected_row_paths.clear()
+        ordered_row_paths = []
+        for info in selected_file_infos:
+            file_path = info["path"]
+            if file_path in row_state_by_file:
+                ordered_row_paths.append(file_path)
+                selected_row_paths.add(file_path)
+        active_row_path = ordered_row_paths[0] if ordered_row_paths else None
+        row_selection_anchor_path = active_row_path
+        selection_context = "rows"
+        _refresh_all_row_visuals()
+        _set_status("Selected all PDF rows for rotation.")
+
+    def _handle_row_click(event, file_path):
+        nonlocal active_row_path, row_selection_anchor_path, selection_context
+        selection_context = "rows"
+        ctrl_pressed = _is_ctrl_pressed(event)
+        shift_pressed = _is_shift_pressed(event)
+
+        if shift_pressed:
+            anchor_file_path = row_selection_anchor_path
+            if anchor_file_path not in row_state_by_file:
+                anchor_file_path = active_row_path if active_row_path in row_state_by_file else file_path
+            _apply_row_span_selection(anchor_file_path, file_path, additive=ctrl_pressed)
+            active_row_path = file_path
+        elif ctrl_pressed:
+            if file_path in selected_row_paths:
+                selected_row_paths.remove(file_path)
+                if active_row_path == file_path:
+                    ordered_rows = _ordered_selected_row_paths()
+                    active_row_path = ordered_rows[0] if ordered_rows else None
+            else:
+                selected_row_paths.add(file_path)
+                active_row_path = file_path
+            row_selection_anchor_path = file_path
+        else:
+            selected_row_paths.clear()
+            selected_row_paths.add(file_path)
+            active_row_path = file_path
+            row_selection_anchor_path = file_path
+
+        _refresh_all_row_visuals()
+        _set_status()
+        return "break"
+
+    def _handle_page_click(event, file_path, page_index):
+        nonlocal active_row_path, row_selection_anchor_path, selection_context
+        selection_context = "pages"
+        active_row_path = file_path
+        row_selection_anchor_path = file_path
+
+        ctrl_pressed = _is_ctrl_pressed(event)
+        shift_pressed = _is_shift_pressed(event)
+
+        if ctrl_pressed or shift_pressed:
+            selected_row_paths.add(file_path)
+        else:
+            selected_row_paths.clear()
+            selected_row_paths.add(file_path)
+            _clear_page_selections_except(file_path)
+
+        if shift_pressed:
+            anchor_page_index = page_selection_anchor_by_file.get(file_path, page_index)
+            _apply_page_span_selection(file_path, anchor_page_index, page_index, additive=ctrl_pressed)
+            if file_path not in page_selection_anchor_by_file:
+                page_selection_anchor_by_file[file_path] = page_index
+            if not ctrl_pressed:
+                _clear_page_selections_except(file_path)
+        else:
+            selected_pages = selected_pages_by_file.setdefault(file_path, set())
+            if ctrl_pressed:
+                if page_index in selected_pages:
+                    selected_pages.remove(page_index)
+                else:
+                    selected_pages.add(page_index)
+            else:
+                selected_pages.clear()
+                selected_pages.add(page_index)
+            page_selection_anchor_by_file[file_path] = page_index
+
+        _refresh_all_row_visuals()
+        _set_status()
+        return "break"
+
+    def _handle_ctrl_select_all(event=None):
+        nonlocal selection_context
+
+        if selection_context == "pages" and active_row_path in page_entries_by_file:
+            selected_pages_by_file[active_row_path] = {
+                entry["page_index"] for entry in page_entries_by_file[active_row_path]
+            }
+            if selected_pages_by_file[active_row_path]:
+                page_selection_anchor_by_file[active_row_path] = min(selected_pages_by_file[active_row_path])
+            _refresh_all_row_visuals()
+            _set_status("Selected all pages in the active PDF row.")
+            return "break"
+
+        _select_all_rows()
+        return "break"
+
+    win.bind("<Control-a>", _handle_ctrl_select_all, add="+")
+    win.bind("<Control-A>", _handle_ctrl_select_all, add="+")
+
+    def _bind_row_shift_scroll(widget, row_canvas):
+        def _on_shift_wheel(event=None):
+            if event is None or not _is_shift_pressed(event):
+                return None
+
+            if hasattr(event, "delta") and event.delta:
+                steps = int(-1 * (event.delta / 120))
+                if steps != 0:
+                    row_canvas.xview_scroll(steps, "units")
+                return "break"
+
+            event_num = getattr(event, "num", None)
+            if event_num == 4:
+                row_canvas.xview_scroll(-1, "units")
+                return "break"
+            if event_num == 5:
+                row_canvas.xview_scroll(1, "units")
+                return "break"
+            return None
+
+        widget.bind("<MouseWheel>", _on_shift_wheel, add="+")
+        widget.bind("<Button-4>", _on_shift_wheel, add="+")
+        widget.bind("<Button-5>", _on_shift_wheel, add="+")
+
+    def _bind_preview_ctrl_zoom_scroll(widget):
+        def _on_ctrl_zoom_wheel(event=None):
+            if event is None or not _is_ctrl_pressed(event):
+                return None
+
+            zoom_direction = 0
+            if hasattr(event, "delta") and event.delta:
+                zoom_direction = 1 if event.delta > 0 else -1
+            else:
+                event_num = getattr(event, "num", None)
+                if event_num == 4:
+                    zoom_direction = 1
+                elif event_num == 5:
+                    zoom_direction = -1
+
+            if zoom_direction == 0:
+                return "break"
+
+            try:
+                current_width = int(float(thumbnail_size_var.get()))
+            except Exception:
+                current_width = ROTATION_PREVIEW_THUMB_MAX_WIDTH
+
+            target_width = current_width + (10 * zoom_direction)
+            target_width = max(ROTATION_PREVIEW_THUMB_MIN_WIDTH, target_width)
+            target_width = min(ROTATION_PREVIEW_THUMB_MAX_LIMIT, target_width)
+
+            if target_width != current_width:
+                thumbnail_size_var.set(target_width)
+                _refresh_all_thumbnail_sizes()
+
+            return "break"
+
+        widget.bind("<MouseWheel>", _on_ctrl_zoom_wheel, add="+")
+        widget.bind("<Button-4>", _on_ctrl_zoom_wheel, add="+")
+        widget.bind("<Button-5>", _on_ctrl_zoom_wheel, add="+")
+
+    def _calculate_page_strip_canvas_height():
+        try:
+            thumb_width = int(float(thumbnail_size_var.get()))
+        except Exception:
+            thumb_width = ROTATION_PREVIEW_THUMB_MAX_WIDTH
+
+        thumb_width = max(ROTATION_PREVIEW_THUMB_MIN_WIDTH, thumb_width)
+        thumb_width = min(ROTATION_PREVIEW_THUMB_MAX_LIMIT, thumb_width)
+
+        estimated_page_height = int(thumb_width * 1.45)
+        return max(200, min(520, estimated_page_height + 80))
+
+    def _refresh_page_entry_preview(entry):
+        page_rotation = int(entry.get("rotation_degrees", 0)) % 360
+        page_label = entry.get("page_label")
+        if page_label is not None and page_label.winfo_exists():
+            if page_rotation:
+                page_label.configure(
+                    text=f"Page {entry['page_index'] + 1} / {entry['page_count']} | {page_rotation}\N{DEGREE SIGN}"
+                )
+            else:
+                page_label.configure(text=f"Page {entry['page_index'] + 1} / {entry['page_count']}")
+
+        image_label = entry.get("image_label")
+        base_thumbnail = entry.get("base_thumbnail_pil")
+        if image_label is None or not image_label.winfo_exists() or base_thumbnail is None:
+            return
+
+        render_image = base_thumbnail
+        if page_rotation:
+            render_image = base_thumbnail.rotate(-page_rotation, expand=True)
+
+        image_photo = _build_pdf_thumbnail_photo(
+            render_image,
+            max_width=max(90, int(float(thumbnail_size_var.get()))),
+        )
+        if image_photo is None:
+            return
+
+        entry["thumbnail_photo"] = image_photo
+        image_label.configure(image=image_photo)
+
+    def _refresh_all_thumbnail_sizes(*_args):
+        global rotation_preview_thumb_width
+
+        try:
+            rotation_preview_thumb_width = int(float(thumbnail_size_var.get()))
+            rotation_preview_thumb_width = max(ROTATION_PREVIEW_THUMB_MIN_WIDTH, rotation_preview_thumb_width)
+            rotation_preview_thumb_width = min(ROTATION_PREVIEW_THUMB_MAX_LIMIT, rotation_preview_thumb_width)
+        except Exception:
+            pass
+
+        page_size_value_label.configure(text=f"{int(float(thumbnail_size_var.get()))} px")
+
+        target_canvas_height = _calculate_page_strip_canvas_height()
+        for row_state in row_state_by_file.values():
+            pages_canvas_widget = row_state.get("pages_canvas")
+            if pages_canvas_widget is None:
+                continue
+            try:
+                if pages_canvas_widget.winfo_exists():
+                    pages_canvas_widget.configure(height=target_canvas_height)
+            except tk.TclError:
+                pass
+
+        for entry in page_entries:
+            _refresh_page_entry_preview(entry)
+        _set_status()
+        _update_preview_scrollregion()
+
+    page_size_scale.configure(command=lambda _value: _refresh_all_thumbnail_sizes())
+
+    def _apply_preview_rotation(degrees):
+        ordered_rows = _ordered_selected_row_paths()
+        if not ordered_rows:
+            messagebox.showwarning(
+                "Rotate PDF",
+                "Select at least one PDF row to rotate.",
+                parent=win,
+            )
+            return
+
+        updated_count = 0
+        for file_path in ordered_rows:
+            row_entries = page_entries_by_file.get(file_path, [])
+            selected_pages = selected_pages_by_file.get(file_path, set())
+
+            for entry in row_entries:
+                if selected_pages and entry["page_index"] not in selected_pages:
+                    continue
+
+                entry["rotation_degrees"] = (
+                    int(entry.get("rotation_degrees", 0)) + int(degrees)
+                ) % 360
+                _refresh_page_entry_preview(entry)
+                updated_count += 1
+
+            _update_row_header(file_path)
+            _update_row_visual(file_path)
+
+        if updated_count > 0:
+            pending_changes = _collect_rotation_changes_by_file()
+            changed_files = len(pending_changes)
+            status_var.set(
+                f"Preview updated for {updated_count} page(s). Unsaved changes in {changed_files} file(s)."
+            )
+            _update_preview_scrollregion()
+
+    def _clear_page_rows():
+        for row in row_widgets:
+            try:
+                row.destroy()
+            except tk.TclError:
+                pass
+
+        page_entries.clear()
+        row_widgets.clear()
+
+    def _populate_page_rows():
+        _clear_page_rows()
+
+        nonlocal active_row_path, row_selection_anchor_path, selection_context, total_loaded_pages, preview_error_count
+        total_loaded_pages = 0
+        preview_error_count = 0
+
+        selected_row_paths.clear()
+        selected_pages_by_file.clear()
+        page_selection_anchor_by_file.clear()
+        row_state_by_file.clear()
+        page_entries_by_file.clear()
+
+        displayable_files = 0
+
+        for file_info in selected_file_infos:
+            file_name = file_info["name"]
+            file_path = file_info["path"]
+
+            if not os.path.exists(file_path):
+                preview_error_count += 1
+                continue
+
+            page_count = get_pdf_page_count(file_path)
+            if not page_count:
+                preview_error_count += 1
+                continue
+
+            file_info["page_count"] = page_count
+            displayable_files += 1
+
+            selected_row_paths.add(file_path)
+            selected_pages_by_file[file_path] = set()
+
+            file_row = tk.Frame(
+                preview_cards_frame,
+                bg=row_bg_normal,
+                highlightthickness=2,
+                highlightbackground=row_border_normal,
+                highlightcolor=row_border_normal,
+                bd=0,
+                padx=8,
+                pady=8,
+            )
+            file_row.grid(row=displayable_files - 1, column=0, sticky="ew", padx=6, pady=6)
+            file_row.columnconfigure(0, weight=1)
+            row_widgets.append(file_row)
+
+            file_header = tk.Label(
+                file_row,
+                text=f"{file_name} ({page_count} page{'s' if page_count != 1 else ''})",
+                bg=row_bg_normal,
+                fg=TEXT_COLOR,
+                font=("Segoe UI Semibold", 10),
+                justify="left",
+                wraplength=980,
+                anchor="w",
+            )
+            file_header.grid(row=0, column=0, sticky="w")
+
+            pages_row = tk.Frame(file_row, bg=row_bg_normal)
+            pages_row.grid(row=1, column=0, sticky="we", pady=(6, 0))
+            pages_row.columnconfigure(0, weight=1)
+
+            pages_canvas = tk.Canvas(
+                pages_row,
+                bg=row_bg_normal,
+                bd=0,
+                highlightthickness=0,
+                height=_calculate_page_strip_canvas_height(),
+            )
+            pages_canvas.pack(side="top", fill="x", expand=True)
+
+            pages_hscrollbar = ttk.Scrollbar(pages_row, orient="horizontal", command=pages_canvas.xview)
+            pages_hscrollbar.pack(side="top", fill="x", pady=(4, 0))
+            pages_canvas.configure(xscrollcommand=pages_hscrollbar.set)
+
+            pages_inner = tk.Frame(pages_canvas, bg=row_bg_normal)
+            pages_canvas.create_window((0, 0), window=pages_inner, anchor="nw")
+
+            pages_inner.bind(
+                "<Configure>",
+                lambda _event, target_canvas=pages_canvas: target_canvas.configure(scrollregion=target_canvas.bbox("all")),
+                add="+",
+            )
+
+            row_state_by_file[file_path] = {
+                "file_info": file_info,
+                "row_frame": file_row,
+                "header_label": file_header,
+                "pages_canvas": pages_canvas,
+                "pages_inner": pages_inner,
+            }
+            page_entries_by_file[file_path] = []
+
+            for row_click_widget in (file_row, file_header, pages_row):
+                row_click_widget.bind(
+                    "<Button-1>",
+                    lambda event, path=file_path: _handle_row_click(event, path),
+                    add="+",
+                )
+                _bind_row_shift_scroll(row_click_widget, pages_canvas)
+
+            _bind_row_shift_scroll(pages_canvas, pages_canvas)
+            _bind_row_shift_scroll(pages_inner, pages_canvas)
+            _bind_preview_ctrl_zoom_scroll(pages_canvas)
+            _bind_preview_ctrl_zoom_scroll(pages_inner)
+
+            pdf_document = None
+            pdf_pages = None
+            if pdfplumber is not None and Image is not None and ImageTk is not None:
+                try:
+                    pdf_document = pdfplumber.open(file_path)
+                    pdf_pages = pdf_document.pages
+                except Exception:
+                    pdf_document = None
+                    pdf_pages = None
+
+            try:
+                for page_index in range(page_count):
+                    thumbnail_pil = None
+                    if pdf_pages is not None and page_index < len(pdf_pages):
+                        thumbnail_pil = _create_pdf_page_thumbnail(pdf_pages[page_index], max_width=420)
+
+                    card = tk.Frame(
+                        pages_inner,
+                        bg=page_bg_normal,
+                        highlightthickness=2,
+                        highlightbackground=page_border_normal,
+                        highlightcolor=page_border_normal,
+                        bd=0,
+                        padx=6,
+                        pady=6,
+                    )
+                    card.pack(side="left", padx=(0, 8), pady=(0, 4), anchor="n")
+
+                    page_title = tk.Label(
+                        card,
+                        text=f"Page {page_index + 1}",
+                        bg=page_bg_normal,
+                        fg=TEXT_COLOR,
+                        font=("Segoe UI", 9),
+                        anchor="w",
+                    )
+                    page_title.pack(anchor="w")
+
+                    image_label = None
+                    thumbnail_photo = None
+                    bg_widgets = [card, page_title]
+                    clickable_widgets = [card, page_title]
+
+                    if thumbnail_pil is not None:
+                        thumbnail_photo = _build_pdf_thumbnail_photo(
+                            thumbnail_pil,
+                            max_width=max(90, int(float(thumbnail_size_var.get()))),
+                        )
+                        image_label = tk.Label(
+                            card,
+                            image=thumbnail_photo,
+                            bg=page_bg_normal,
+                            fg=LISTBOX_TEXT,
+                            bd=0,
+                            padx=4,
+                            pady=4,
+                        )
+                        image_label.pack(anchor="w", pady=(6, 4))
+                        bg_widgets.append(image_label)
+                        clickable_widgets.append(image_label)
+                    else:
+                        placeholder = tk.Label(
+                            card,
+                            text="Preview unavailable",
+                            bg=page_bg_normal,
+                            fg=LISTBOX_TEXT,
+                            padx=8,
+                            pady=18,
+                            width=22,
+                            anchor="center",
+                            justify="center",
+                        )
+                        placeholder.pack(anchor="w", pady=(6, 4))
+                        bg_widgets.append(placeholder)
+                        clickable_widgets.append(placeholder)
+
+                    page_label = tk.Label(
+                        card,
+                        text=f"Page {page_index + 1} / {page_count}",
+                        bg=page_bg_normal,
+                        fg=TEXT_COLOR,
+                        font=("Segoe UI", 9),
+                        anchor="w",
+                    )
+                    page_label.pack(anchor="w")
+                    bg_widgets.append(page_label)
+                    clickable_widgets.append(page_label)
+
+                    for widget in clickable_widgets:
+                        widget.bind(
+                            "<Button-1>",
+                            lambda event, path=file_path, idx=page_index: _handle_page_click(event, path, idx),
+                            add="+",
+                        )
+                        _bind_row_shift_scroll(widget, pages_canvas)
+                        _bind_preview_ctrl_zoom_scroll(widget)
+
+                    entry = {
+                        "file_name": file_name,
+                        "file_path": file_path,
+                        "page_index": page_index,
+                        "page_count": page_count,
+                        "page_label": page_label,
+                        "image_label": image_label,
+                        "base_thumbnail_pil": thumbnail_pil,
+                        "thumbnail_photo": thumbnail_photo,
+                        "rotation_degrees": 0,
+                        "card_frame": card,
+                        "bg_widgets": bg_widgets,
+                    }
+                    page_entries.append(entry)
+                    page_entries_by_file[file_path].append(entry)
+                    total_loaded_pages += 1
+            finally:
+                if pdf_document is not None:
+                    try:
+                        pdf_document.close()
+                    except Exception:
+                        pass
+
+        if not row_widgets:
+            empty_label = ttk.Label(
+                preview_cards_frame,
+                text="No pages are available for preview in the selected files.",
+                style="Subheading.TLabel",
+                justify="left",
+                wraplength=620,
+            )
+            empty_label.grid(row=0, column=0, padx=6, pady=6, sticky="w")
+            row_widgets.append(empty_label)
+
+        ordered_rows = _ordered_selected_row_paths()
+        active_row_path = ordered_rows[0] if ordered_rows else None
+        row_selection_anchor_path = active_row_path
+        selection_context = "rows"
+
+        _refresh_all_row_visuals()
+        _update_preview_scrollregion()
+        _set_status(
+            f"Loaded {total_loaded_pages} page(s) across {len(row_state_by_file)} selected PDF file(s). "
+            f"Preview errors: {preview_error_count}. Rotate for preview, then click Save Rotation to write changes."
+        )
+
+    def _save_rotations_to_files():
+        rotation_changes = _collect_rotation_changes_by_file()
+        if not rotation_changes:
+            messagebox.showinfo(
+                "Rotate PDF",
+                "No pending rotation changes to save.",
+                parent=win,
+            )
+            return
+
+        files_with_changes = len(rotation_changes)
+        if not messagebox.askyesno(
+            "Save Rotation",
+            f"Save rotation changes for {files_with_changes} PDF file(s)?",
+            parent=win,
+        ):
+            return
+
+        rotated_files = 0
+        rotated_pages = 0
+        failed_items = []
+
+        for file_info in selected_file_infos:
+            file_path = file_info["path"]
+            page_rotation_map = rotation_changes.get(file_path)
+            if not page_rotation_map:
+                continue
+
+            try:
+                if backup_before_rotate_var.get():
+                    create_backup_file(file_path)
+
+                rotated_count = _rotate_pdf_pages_in_place(
+                    file_path,
+                    page_rotation_map=page_rotation_map,
+                )
+                rotated_pages += max(0, int(rotated_count))
+                rotated_files += 1
+            except Exception as exc:
+                failed_items.append(f"{file_info['name']}: {exc}")
+
+        if callable(post_save_callback):
+            try:
+                post_save_callback()
+            except Exception as exc:
+                messagebox.showwarning(
+                    "Rotate PDF",
+                    f"Saved changes, but refresh callback failed: {exc}",
+                    parent=win,
+                )
+        elif selected_file_infos_override is None:
+            load_pending_files()
+        if rotated_files > 0:
+            status_var.set("Saved changes. Refreshing preview from updated PDFs...")
+            win.update_idletasks()
+            _populate_page_rows()
+
+        if failed_items and rotated_files == 0:
+            details = "\n".join(failed_items[:8])
+            if len(failed_items) > 8:
+                details += "\n..."
+            messagebox.showerror(
+                "Rotate PDF",
+                "Saving rotation failed for all files.\n\n" + details,
+                parent=win,
+            )
+            return
+
+        if failed_items:
+            details = "\n".join(failed_items[:6])
+            if len(failed_items) > 6:
+                details += "\n..."
+            messagebox.showwarning(
+                "Rotate PDF",
+                f"Saved rotation for {rotated_files} file(s), {rotated_pages} page(s).\n"
+                f"Failed files: {len(failed_items)}\n\n{details}",
+                parent=win,
+            )
+            return
+
+        _set_status(f"Saved rotation changes for {rotated_files} file(s), {rotated_pages} page(s).")
+        messagebox.showinfo(
+            "Rotate PDF",
+            f"Rotation saved successfully for {rotated_files} file(s), {rotated_pages} page(s).",
+            parent=win,
+        )
+
+    rotate_left_button.configure(command=lambda: _apply_preview_rotation(-90))
+    rotate_right_button.configure(command=lambda: _apply_preview_rotation(90))
+    save_rotation_button.configure(command=_save_rotations_to_files)
+
+    status_var.set("Loading page previews...")
+    win.update_idletasks()
+    _populate_page_rows()
 
 
 def get_selected_pending_files():
@@ -4154,15 +6131,25 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             preview_button.pack(side="right", padx=(8, 0))
             _configure_icon_button(preview_button, "preview", TOOLBAR_ICON_PREVIEW, "Preview")
             _attach_hover_tooltip(preview_button, "Preview this existing PDF")
+            preview_button.bind(
+                "<Button-1>",
+                lambda _event, target_button=preview_button: (target_button.invoke(), "break")[1],
+                add="+",
+            )
 
             edit_button = ttk.Button(
                 row,
                 style="ToolbarIcon.TButton",
-                command=lambda target_file=file: rename_existing_pdf(target_file),
+                command=lambda target_file=file: edit_existing_pdf(target_file),
             )
             edit_button.pack(side="right", padx=(0, 8))
             _configure_icon_button(edit_button, "edit", TOOLBAR_ICON_EDIT, "Edit")
-            _attach_hover_tooltip(edit_button, "Rename this existing PDF")
+            _attach_hover_tooltip(edit_button, "Rename or rotate this existing PDF")
+            edit_button.bind(
+                "<Button-1>",
+                lambda _event, target_button=edit_button: (target_button.invoke(), "break")[1],
+                add="+",
+            )
 
             if display_name != file:
                 _attach_hover_tooltip(name_label, file)
@@ -4318,6 +6305,66 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         load_existing_pdfs()
         refresh_destination_preview()
         update_merge_summary()
+
+    def rotate_existing_pdf(target_filename=None):
+        filename = (target_filename or existing_selected_pdf_var.get().strip()).strip()
+        if not filename:
+            messagebox.showwarning("Warning", "Select an existing PDF to rotate.", parent=win)
+            return
+
+        folder = normalize_path(folder_var.get())
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("Error", "Select a valid employee folder first.", parent=win)
+            return
+
+        source_path = normalize_path(os.path.join(folder, filename))
+        if not os.path.exists(source_path):
+            messagebox.showerror("Error", "The selected PDF no longer exists.", parent=win)
+            load_existing_pdfs()
+            return
+
+        def _refresh_existing_after_rotation_save():
+            existing_selected_pdf_var.set(filename)
+            load_existing_pdfs()
+            refresh_destination_preview()
+            update_merge_summary()
+
+        rotate_selected_pending_pdfs(
+            selected_file_infos_override=[
+                {
+                    "name": filename,
+                    "path": source_path,
+                    "page_count": 0,
+                }
+            ],
+            window_title=f"Rotate Existing PDF - {filename}",
+            post_save_callback=_refresh_existing_after_rotation_save,
+            parent_window=win,
+        )
+
+    def edit_existing_pdf(target_filename=None):
+        filename = (target_filename or existing_selected_pdf_var.get().strip()).strip()
+        if not filename:
+            messagebox.showwarning("Warning", "Select an existing PDF first.", parent=win)
+            return
+
+        action_choice = messagebox.askyesnocancel(
+            "Edit Existing PDF",
+            (
+                f"Choose action for:\n{filename}\n\n"
+                "Yes = Rename PDF\n"
+                "No = Rotate PDF\n"
+                "Cancel = Close"
+            ),
+            parent=win,
+        )
+        if action_choice is None:
+            return
+
+        if action_choice:
+            rename_existing_pdf(filename)
+        else:
+            rotate_existing_pdf(filename)
 
     def validate_years():
         latest = new_year_var.get().strip()
@@ -4807,6 +6854,8 @@ def employee_details_editor_window():
     folder_path_suggestions = []
     folder_suggestion_entries = []
     folder_suggestion_label_to_path = {}
+    folder_watch_after_id = None
+    folder_watch_snapshot = None
 
     def ensure_folder_under_root(chosen_folder):
         chosen_folder = normalize_path(chosen_folder)
@@ -4953,9 +7002,32 @@ def employee_details_editor_window():
 
         return candidate
 
+    def _build_folder_pdf_snapshot(folder_path):
+        folder = normalize_path(folder_path)
+        if not folder or not os.path.isdir(folder):
+            return ()
+
+        try:
+            pdf_names = sorted(
+                filename for filename in os.listdir(folder) if filename.lower().endswith(".pdf")
+            )
+        except OSError:
+            return None
+
+        snapshot_items = []
+        for filename in pdf_names:
+            file_path = normalize_path(os.path.join(folder, filename))
+            try:
+                stats = os.stat(file_path)
+                snapshot_items.append((filename, int(stats.st_mtime_ns), int(stats.st_size)))
+            except OSError:
+                snapshot_items.append((filename, -1, -1))
+
+        return tuple(snapshot_items)
+
     def _refresh_status_choices():
         nonlocal status_values
-        discovered = ["Active", "Retiree"]
+        discovered = []
         try:
             entries = sorted(os.listdir(root_path))
         except OSError:
@@ -4970,8 +7042,17 @@ def employee_details_editor_window():
         status_field["values"] = status_values
 
         current_target = target_status_var.get().strip()
-        if current_target not in status_values:
+        current_status = current_status_var.get().strip()
+
+        if current_target in status_values:
+            return
+        if current_status in status_values:
+            target_status_var.set(current_status)
+            return
+        if status_values:
             target_status_var.set(status_values[0])
+        else:
+            target_status_var.set("")
 
     def _clear_file_editor_fields():
         selected_file_var.set("No PDF selected")
@@ -5002,7 +7083,9 @@ def employee_details_editor_window():
         created_var.set(_format_editor_datetime(datetime.fromtimestamp(os.path.getctime(file_path))))
         modified_var.set(_format_editor_datetime(datetime.fromtimestamp(os.path.getmtime(file_path))))
 
-    def _refresh_files_list(preferred_name=""):
+    def _refresh_files_list(preferred_name="", show_errors=True):
+        nonlocal folder_watch_snapshot
+
         current_name = preferred_name or _get_selected_file_name()
         files_listbox.delete(0, tk.END)
 
@@ -5010,6 +7093,7 @@ def employee_details_editor_window():
         if not folder or not os.path.isdir(folder):
             files_count_var.set("PDF files: 0")
             _clear_file_editor_fields()
+            folder_watch_snapshot = ()
             return
 
         try:
@@ -5017,10 +7101,14 @@ def employee_details_editor_window():
                 filename for filename in os.listdir(folder) if filename.lower().endswith(".pdf")
             )
         except OSError as exc:
-            messagebox.showerror("Error", f"Unable to load PDFs: {exc}", parent=win)
+            if show_errors:
+                messagebox.showerror("Error", f"Unable to load PDFs: {exc}", parent=win)
             files_count_var.set("PDF files: 0")
             _clear_file_editor_fields()
+            folder_watch_snapshot = None
             return
+
+        folder_watch_snapshot = _build_folder_pdf_snapshot(folder)
 
         for filename in pdf_files:
             files_listbox.insert(tk.END, filename)
@@ -5094,6 +7182,34 @@ def employee_details_editor_window():
             return
         _refresh_folder_autocomplete_catalog()
         _load_employee_folder_details(chosen, show_errors=True)
+
+    def _poll_folder_file_changes():
+        nonlocal folder_watch_after_id, folder_watch_snapshot
+
+        folder_watch_after_id = None
+        try:
+            if not win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        folder = normalize_path(folder_var.get().strip())
+        if folder and os.path.isdir(folder) and ensure_folder_under_root(folder):
+            current_snapshot = _build_folder_pdf_snapshot(folder)
+            if current_snapshot is not None and current_snapshot != folder_watch_snapshot:
+                selected_name = _get_selected_file_name()
+                _refresh_files_list(preferred_name=selected_name, show_errors=False)
+                _refresh_selected_file_details()
+                folder_watch_snapshot = _build_folder_pdf_snapshot(folder)
+        else:
+            if folder_watch_snapshot not in (None, ()):
+                _refresh_files_list(show_errors=False)
+            folder_watch_snapshot = _build_folder_pdf_snapshot(folder)
+
+        try:
+            folder_watch_after_id = win.after(1200, _poll_folder_file_changes)
+        except tk.TclError:
+            folder_watch_after_id = None
 
     def _open_selected_folder():
         folder = normalize_path(folder_var.get().strip())
@@ -5552,11 +7668,10 @@ def employee_details_editor_window():
     folder_field.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0), padx=(0, 8))
     _prevent_combobox_mousewheel_value_change(folder_field)
     ttk.Button(folder_card, text="Browse", command=_browse_employee_folder).grid(row=1, column=2, pady=(6, 0), padx=(0, 8))
-    ttk.Button(folder_card, text="Load", command=_load_employee_folder_details).grid(row=1, column=3, pady=(6, 0))
+    ttk.Button(folder_card, text="Open Folder", command=_open_selected_folder).grid(row=1, column=3, pady=(6, 0))
 
     ttk.Label(folder_card, text="Employee Name:").grid(row=2, column=0, sticky="w", pady=(10, 0))
     ttk.Label(folder_card, textvariable=employee_name_var, style="Subheading.TLabel").grid(row=2, column=1, sticky="w", pady=(10, 0))
-    ttk.Button(folder_card, text="Open Folder", command=_open_selected_folder).grid(row=2, column=3, sticky="e", pady=(10, 0))
 
     ttk.Label(folder_card, text="Folder Name:").grid(row=3, column=0, sticky="w", pady=(10, 0))
     folder_name_field = ttk.Combobox(folder_card, textvariable=folder_name_var, state="normal")
@@ -5659,15 +7774,34 @@ def employee_details_editor_window():
         style="Accent.TButton",
     ).pack(anchor="w", pady=(12, 0))
 
+    def _close_employee_details_window():
+        nonlocal folder_watch_after_id
+
+        if folder_watch_after_id is not None:
+            try:
+                win.after_cancel(folder_watch_after_id)
+            except tk.TclError:
+                pass
+            folder_watch_after_id = None
+
+        if win.winfo_exists():
+            win.destroy()
+
     bottom_actions = ttk.Frame(content, style="TFrame")
     bottom_actions.pack(fill="x", pady=(12, 0))
-    ttk.Button(bottom_actions, text="Close", command=win.destroy).pack(side="right")
+    ttk.Button(bottom_actions, text="Close", command=_close_employee_details_window).pack(side="right")
 
     files_listbox.bind("<<ListboxSelect>>", lambda _event=None: _refresh_selected_file_details())
 
     _refresh_status_choices()
     _refresh_folder_autocomplete_catalog()
     _refresh_folder_choices()
+    folder_watch_snapshot = _build_folder_pdf_snapshot(folder_var.get().strip())
+    try:
+        folder_watch_after_id = win.after(1200, _poll_folder_file_changes)
+    except tk.TclError:
+        folder_watch_after_id = None
+    win.protocol("WM_DELETE_WINDOW", _close_employee_details_window)
 
 
 def show_selected_batch_files_window(
@@ -6040,13 +8174,42 @@ employee_sources_scrollbar.pack(side="right", fill="y")
 employee_sources_listbox = tk.Listbox(
     employee_sources_container,
     height=4,
+    selectmode="extended",
     yscrollcommand=employee_sources_scrollbar.set,
 )
 _apply_modern_listbox_style(employee_sources_listbox)
 employee_sources_listbox.pack(side="left", fill="x", expand=True)
 employee_sources_scrollbar.configure(command=employee_sources_listbox.yview)
 _mark_widget_as_scroll_list(employee_sources_listbox)
+
+
+def _select_all_employee_sources(_event=None):
+    if employee_sources_listbox is None or not employee_sources_listbox.winfo_exists():
+        return "break"
+
+    list_size = employee_sources_listbox.size()
+    if list_size <= 0:
+        return "break"
+
+    employee_sources_listbox.selection_set(0, tk.END)
+    employee_sources_listbox.activate(0)
+    employee_sources_listbox.see(0)
+    _refresh_employee_sources_selection_count()
+    return "break"
+
+
+employee_sources_listbox.bind("<Control-a>", _select_all_employee_sources, add="+")
+employee_sources_listbox.bind("<Control-A>", _select_all_employee_sources, add="+")
+employee_sources_listbox.bind("<<ListboxSelect>>", _refresh_employee_sources_selection_count, add="+")
 _refresh_employee_sources_listbox()
+
+ttk.Label(
+    names_card,
+    textvariable=employee_sources_selection_count_var,
+    style="Subheading.TLabel",
+    padding=(0, 2),
+    anchor="w",
+).pack(fill="x")
 
 ui_icon_images = _build_pending_toolbar_icon_images()
 
@@ -6104,13 +8267,13 @@ _attach_hover_tooltip(pending_master_toggle_button, "Toggle all pending selectio
 pending_master_actions = ttk.Frame(pending_master_row, style="Card.TFrame")
 pending_master_actions.pack(side="right")
 
-pending_refresh_button = ttk.Button(
+pending_rotate_button = ttk.Button(
     pending_master_actions,
     style="ToolbarIcon.TButton",
-    command=load_pending_files,
+    command=rotate_selected_pending_pdfs,
 )
-pending_refresh_button.pack(side="left", padx=4)
-_attach_hover_tooltip(pending_refresh_button, "Refresh pending files")
+pending_rotate_button.pack(side="left", padx=4)
+_attach_hover_tooltip(pending_rotate_button, "Rotate pages in selected pending PDFs")
 
 pending_preview_button = ttk.Button(
     pending_master_actions,
@@ -6135,11 +8298,20 @@ pending_canvas.pack(side="left", fill="both", expand=True)
 pending_scrollbar = ttk.Scrollbar(listbox_container, orient="vertical", command=pending_canvas.yview)
 pending_scrollbar.pack(side="right", fill="y")
 pending_canvas.configure(yscrollcommand=pending_scrollbar.set)
+pending_canvas_widget = pending_canvas
+pending_canvas.configure(takefocus=1)
 _mark_widget_as_scroll_canvas(pending_canvas)
 _ensure_global_mousewheel_binding()
 
+pending_canvas.bind("<Button-1>", lambda _event: _focus_pending_selection_surface(), add="+")
+pending_canvas.bind("<Control-a>", _on_pending_ctrl_select_all, add="+")
+pending_canvas.bind("<Control-A>", _on_pending_ctrl_select_all, add="+")
+
 pending_items_frame = ttk.Frame(pending_canvas, style="Card.TFrame")
 pending_canvas_window = pending_canvas.create_window((0, 0), window=pending_items_frame, anchor="nw")
+pending_items_frame.bind("<Button-1>", lambda _event: _focus_pending_selection_surface(), add="+")
+pending_items_frame.bind("<Control-a>", _on_pending_ctrl_select_all, add="+")
+pending_items_frame.bind("<Control-A>", _on_pending_ctrl_select_all, add="+")
 
 def _resize_pending_canvas(event):
     pending_canvas.itemconfigure(pending_canvas_window, width=event.width)
