@@ -1,0 +1,7 @@
+{
+  "version": "1.2.0",
+  "installer_url": "https://github.com/rexflores/PDFRecordManager/releases/latest/download/PDFRecordManager-Setup.exe",
+  "portable_url": "https://github.com/rexflores/PDFRecordManager/releases/latest/download/PDFRecordManager-Portable.zip",
+  "release_page_url": "https://github.com/rexflores/PDFRecordManager/releases/latest",
+  "notes": "Release 1.2.0"
+}
