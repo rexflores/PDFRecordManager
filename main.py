@@ -103,7 +103,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -1561,6 +1561,25 @@ file_menu.add_cascade(label="Preference", menu=preferences_menu)
 
 application_menu = tk.Menu(file_menu, tearoff=0)
 application_menu.add_command(label="Restart", command=lambda: restart_application())
+backup_cleanup_menu = tk.Menu(application_menu, tearoff=0)
+backup_cleanup_menu.add_command(
+    label="All (Records Root + Pending)",
+    command=lambda: clear_all_backup_folders(),
+)
+backup_cleanup_menu.add_command(
+    label="Records Root Folder Only",
+    command=lambda: clear_root_backup_folders(),
+)
+backup_cleanup_menu.add_command(
+    label="Pending Folder Only",
+    command=lambda: clear_pending_backup_folders(),
+)
+backup_cleanup_menu.add_separator()
+backup_cleanup_menu.add_command(
+    label="Selected Employee Folder Only...",
+    command=lambda: clear_selected_employee_folder_backups(),
+)
+application_menu.add_cascade(label="Clear Backup Folders", menu=backup_cleanup_menu)
 application_menu.add_separator()
 application_menu.add_command(label="Exit", command=lambda: exit_application())
 file_menu.add_cascade(label="Application", menu=application_menu)
@@ -3262,6 +3281,177 @@ def create_backup_file(source_path):
     return backup_path
 
 
+def _collect_backup_directories(base_folder):
+    base_path = normalize_path(base_folder)
+    if not base_path or not os.path.isdir(base_path):
+        return []
+
+    backup_dirs = []
+    for current_dir, dir_names, _file_names in os.walk(base_path):
+        for dir_name in list(dir_names):
+            if dir_name.lower() == "_backups":
+                backup_dirs.append(normalize_path(os.path.join(current_dir, dir_name)))
+
+    deduped = []
+    seen = set()
+    for path in backup_dirs:
+        key = os.path.normcase(os.path.normpath(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+
+    return deduped
+
+
+def _clear_backup_folders_in_scope(candidate_roots, scope_label):
+    valid_roots = []
+    seen_roots = set()
+    for candidate in candidate_roots:
+        normalized = normalize_path(candidate)
+        if not normalized or not os.path.isdir(normalized):
+            continue
+        root_key = os.path.normcase(os.path.normpath(normalized))
+        if root_key in seen_roots:
+            continue
+        seen_roots.add(root_key)
+        valid_roots.append(normalized)
+
+    if not valid_roots:
+        messagebox.showwarning(
+            "Clear Backups",
+            f"No valid folders are configured for: {scope_label}.",
+            parent=root,
+        )
+        return
+
+    backup_dirs = []
+    for folder_path in valid_roots:
+        backup_dirs.extend(_collect_backup_directories(folder_path))
+
+    if not backup_dirs:
+        messagebox.showinfo(
+            "Clear Backups",
+            f"No backup folders were found for: {scope_label}.",
+            parent=root,
+        )
+        return
+
+    preview_lines = [
+        f"Scope: {scope_label}",
+        f"Found {len(backup_dirs)} backup folder(s):",
+        "",
+    ]
+    for path in backup_dirs[:8]:
+        preview_lines.append(f"- {path}")
+    if len(backup_dirs) > 8:
+        preview_lines.append(f"... and {len(backup_dirs) - 8} more")
+    preview_lines.append("")
+    preview_lines.append("Delete these backup folders now?")
+
+    confirmed = messagebox.askyesno(
+        "Clear Backups",
+        "\n".join(preview_lines),
+        parent=root,
+    )
+    if not confirmed:
+        return
+
+    deleted_count = 0
+    failed = []
+    for backup_dir in backup_dirs:
+        try:
+            if send2trash is not None:
+                send2trash(backup_dir)
+            else:
+                shutil.rmtree(backup_dir)
+            deleted_count += 1
+        except Exception as exc:
+            failed.append((backup_dir, str(exc)))
+
+    if failed:
+        detail_lines = [
+            f"Scope: {scope_label}",
+            f"Moved {deleted_count} backup folder(s) to Recycle Bin.",
+            f"Failed to delete {len(failed)} folder(s):",
+            "",
+        ]
+        for path, reason in failed[:5]:
+            detail_lines.append(f"- {path}")
+            detail_lines.append(f"  Reason: {reason}")
+        if len(failed) > 5:
+            detail_lines.append(f"... and {len(failed) - 5} more failure(s).")
+
+        messagebox.showwarning("Clear Backups - Partial Success", "\n".join(detail_lines), parent=root)
+    else:
+        messagebox.showinfo(
+            "Clear Backups",
+            f"Scope: {scope_label}\nMoved {deleted_count} backup folder(s) to Recycle Bin successfully.",
+            parent=root,
+        )
+
+
+def clear_all_backup_folders():
+    _clear_backup_folders_in_scope(
+        [root_folder.get(), pending_folder.get()],
+        "Records Root + Pending",
+    )
+
+
+def clear_root_backup_folders():
+    _clear_backup_folders_in_scope([root_folder.get()], "Records Root Folder")
+
+
+def clear_pending_backup_folders():
+    _clear_backup_folders_in_scope([pending_folder.get()], "Pending Folder")
+
+
+def clear_selected_employee_folder_backups():
+    root_path = normalize_path(root_folder.get())
+    if not root_path or not os.path.isdir(root_path):
+        messagebox.showwarning(
+            "Clear Backups",
+            "Set a valid Records Root Folder first.",
+            parent=root,
+        )
+        return
+
+    chosen_folder = filedialog.askdirectory(
+        parent=root,
+        title="Select Employee Folder to Clear Backups",
+        initialdir=root_path,
+    )
+    if not chosen_folder:
+        return
+
+    selected_path = normalize_path(chosen_folder)
+    if not os.path.isdir(selected_path):
+        messagebox.showwarning(
+            "Clear Backups",
+            "Selected folder does not exist.",
+            parent=root,
+        )
+        return
+
+    try:
+        common_path = os.path.commonpath([os.path.abspath(selected_path), os.path.abspath(root_path)])
+    except ValueError:
+        common_path = ""
+
+    if common_path != os.path.abspath(root_path):
+        messagebox.showwarning(
+            "Clear Backups",
+            "Selected folder must be inside the Records Root Folder.",
+            parent=root,
+        )
+        return
+
+    _clear_backup_folders_in_scope(
+        [selected_path],
+        f"Selected Employee Folder ({os.path.basename(selected_path)})",
+    )
+
+
 def merge_pdf_files(new_pdf_path, existing_pdf_path, output_path):
     _ensure_pdf_merger_available()
     merger = PdfMerger()
@@ -3310,11 +3500,17 @@ def parse_filename_metadata(filename):
 def _normalize_record_year_inputs(latest_text, earliest_text):
     latest = str(latest_text or "").strip()
     earliest = str(earliest_text or "").strip()
+    max_allowed_year = datetime.now().year + 2
 
     if latest and not latest.isdigit():
         raise ValueError("Latest Year must be numeric.")
     if earliest and not earliest.isdigit():
         raise ValueError("Oldest Year must be numeric.")
+
+    if latest and int(latest) > max_allowed_year:
+        raise ValueError(f"Latest Year cannot be greater than {max_allowed_year}.")
+    if earliest and int(earliest) > max_allowed_year:
+        raise ValueError(f"Oldest Year cannot be greater than {max_allowed_year}.")
 
     if not latest and not earliest:
         return None
@@ -3333,13 +3529,21 @@ def _normalize_record_year_inputs(latest_text, earliest_text):
 def _get_year_input_guidance(latest_text, earliest_text):
     latest = str(latest_text or "").strip()
     earliest = str(earliest_text or "").strip()
+    max_allowed_year = datetime.now().year + 2
 
     if not latest and not earliest:
-        return "Enter Latest Year or Oldest Year (at least one is required)."
+        return (
+            "Enter Latest Year or Oldest Year (at least one is required). "
+            f"Maximum allowed year is {max_allowed_year}."
+        )
     if latest and not latest.isdigit():
         return "Latest Year must contain digits only (example: 2025)."
     if earliest and not earliest.isdigit():
         return "Oldest Year must contain digits only (example: 2018)."
+    if latest and int(latest) > max_allowed_year:
+        return f"Latest Year cannot be greater than {max_allowed_year}."
+    if earliest and int(earliest) > max_allowed_year:
+        return f"Oldest Year cannot be greater than {max_allowed_year}."
 
     years = _normalize_record_year_inputs(latest, earliest)
     if years is None:
@@ -3539,6 +3743,84 @@ def archive_pending_file(pending_path):
         os.remove(pending_path)
 
     return destination
+
+
+def _is_file_locked_for_write(file_path):
+    normalized_path = normalize_path(file_path)
+    if not normalized_path or not os.path.exists(normalized_path):
+        return False
+
+    if not sys.platform.startswith("win"):
+        try:
+            with open(normalized_path, "rb+"):
+                return False
+        except OSError:
+            return True
+
+    import ctypes
+    from ctypes import wintypes
+
+    GENERIC_READ = 0x80000000
+    GENERIC_WRITE = 0x40000000
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x00000080
+    INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    close_handle = kernel32.CloseHandle
+
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    file_handle = create_file(
+        normalized_path,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+
+    if file_handle == INVALID_HANDLE_VALUE:
+        return True
+
+    try:
+        return False
+    finally:
+        close_handle(file_handle)
+
+
+def _ensure_pdfs_closed_before_save(file_descriptors, parent=None):
+    locked_files = []
+    for label, path in file_descriptors:
+        normalized_path = normalize_path(path)
+        if not normalized_path or not os.path.exists(normalized_path):
+            continue
+        if _is_file_locked_for_write(normalized_path):
+            locked_files.append((label, normalized_path))
+
+    if not locked_files:
+        return True
+
+    lines = ["Close the following open PDF file(s) before saving:", ""]
+    for label, path in locked_files:
+        lines.append(f"- {label}: {os.path.basename(path)}")
+
+    messagebox.showwarning("PDF In Use", "\n".join(lines), parent=parent)
+    return False
 
 # ------------------------
 # Functions
@@ -6805,14 +7087,26 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         letter_value = letter_var.get().strip().upper() or (employee_name[0].upper() if employee_name else "")
         status_value = status_var.get()
 
+        try:
+            validated_employee_name = _validate_windows_path_component(employee_name, "Employee name")
+            validated_letter = _validate_windows_path_component(letter_value or "#", "Surname initial")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Destination", str(exc), parent=win)
+            return
+
+        target_folder = normalize_path(
+            os.path.join(root_path, status_value, validated_letter, validated_employee_name)
+        )
+        source_folder = normalize_path(folder)
+
         years = validate_years()
         if years is None:
             return
         latest_year, earliest_year = years
         final_filename = _build_record_filename(employee_name, latest_year, earliest_year)
-        final_path = normalize_path(os.path.join(folder, final_filename))
+        final_path = normalize_path(os.path.join(target_folder, final_filename))
 
-        existing_path = normalize_path(os.path.join(folder, existing_filename))
+        existing_path = normalize_path(os.path.join(source_folder, existing_filename))
 
         if not os.path.exists(existing_path):
             messagebox.showerror("Error", "The selected existing PDF was not found. Reload and try again.")
@@ -6827,14 +7121,107 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             messagebox.showerror("Error", "Name is required before merging.")
             return
 
+        folder_change_requested = os.path.normcase(os.path.abspath(source_folder)) != os.path.normcase(
+            os.path.abspath(target_folder)
+        )
+
         confirm_text = (
             f"Merge '{pending_filename}' into '{existing_filename}' (new pages go first)\n"
-            f"and save as '{final_filename}' in:\n{folder}"
+            f"and save as '{final_filename}' in:\n{target_folder}"
         )
+        if folder_change_requested:
+            confirm_text += (
+                "\n\nEmployee folder location will be updated to match edited details "
+                "(status / initial / name)."
+            )
         summary_snapshot = merge_summary_var.get().strip()
         if summary_snapshot:
             confirm_text += f"\n\n{summary_snapshot}"
         if not messagebox.askyesno("Confirm Merge", confirm_text):
+            return
+
+        if folder_change_requested:
+            try:
+                os.makedirs(os.path.dirname(target_folder), exist_ok=True)
+            except OSError as exc:
+                messagebox.showerror(
+                    "Move Failed",
+                    f"Unable to prepare destination folder path:\n{exc}",
+                    parent=win,
+                )
+                return
+
+            if os.path.exists(target_folder):
+                move_choice = messagebox.askyesno(
+                    "Folder Already Exists",
+                    (
+                        "The destination employee folder already exists.\n\n"
+                        "Yes = Move files from the current folder into that destination\n"
+                        "No = Keep editing"
+                    ),
+                    parent=win,
+                )
+                if not move_choice:
+                    return
+
+                try:
+                    for item_name in os.listdir(source_folder):
+                        source_item = normalize_path(os.path.join(source_folder, item_name))
+                        destination_item = normalize_path(os.path.join(target_folder, item_name))
+                        if os.path.exists(destination_item):
+                            raise RuntimeError(
+                                f"Destination already has '{item_name}'. Rename or move it first."
+                            )
+                        shutil.move(source_item, destination_item)
+
+                    try:
+                        if not os.listdir(source_folder):
+                            os.rmdir(source_folder)
+                    except OSError:
+                        pass
+                except Exception as exc:
+                    messagebox.showerror(
+                        "Move Failed",
+                        f"Unable to move employee folder contents:\n{exc}",
+                        parent=win,
+                    )
+                    return
+            else:
+                try:
+                    shutil.move(source_folder, target_folder)
+                except Exception as exc:
+                    messagebox.showerror(
+                        "Move Failed",
+                        f"Unable to move employee folder to the updated location:\n{exc}",
+                        parent=win,
+                    )
+                    return
+
+            folder_var.set(target_folder)
+            existing_path = normalize_path(os.path.join(target_folder, existing_filename))
+            final_path = normalize_path(os.path.join(target_folder, final_filename))
+            source_folder = target_folder
+            _refresh_folder_autocomplete_catalog()
+            load_existing_pdfs()
+            refresh_destination_preview()
+            update_merge_summary()
+
+            if not os.path.exists(existing_path):
+                messagebox.showerror(
+                    "Move Failed",
+                    "The selected existing PDF was not found after moving the folder. Reload and try again.",
+                    parent=win,
+                )
+                return
+
+        files_to_validate = [
+            ("Pending PDF", pending_path),
+            ("Selected existing PDF", existing_path),
+        ]
+        if os.path.exists(final_path):
+            files_to_validate.append(("Destination PDF", final_path))
+
+        if not _ensure_pdfs_closed_before_save(files_to_validate, parent=win):
             return
 
         temp_path = None
