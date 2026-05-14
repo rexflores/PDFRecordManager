@@ -49,6 +49,11 @@ except ImportError:
     Win10ToastNotifier = None
 
 try:
+    import win32crypt
+except Exception:
+    win32crypt = None
+
+try:
     from winotify import Notification as WinotifyNotification
 except ImportError:
     WinotifyNotification = None
@@ -103,7 +108,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.0"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -1612,8 +1617,7 @@ def _resolve_config_path():
 
 
 CONFIG_PATH = _resolve_config_path()
-EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.dat")
-LEGACY_EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.json")
+EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.json")
 
 
 def normalize_path(path):
@@ -1624,120 +1628,9 @@ def _update_employee_list_status(message):
     employee_list_status_var.set(message)
 
 
-def _remove_legacy_employee_name_cache():
-    if not os.path.exists(LEGACY_EMPLOYEE_NAME_CACHE_PATH):
-        return
-    try:
-        os.remove(LEGACY_EMPLOYEE_NAME_CACHE_PATH)
-    except OSError:
-        pass
-
-
-def _protect_employee_name_cache_payload(payload_bytes):
-    if os.name != "nt":
-        return None
-
-    try:
-        import ctypes
-        from ctypes import wintypes
-    except ImportError:
-        return None
-
-    class DATA_BLOB(ctypes.Structure):
-        _fields_ = [
-            ("cbData", wintypes.DWORD),
-            ("pbData", ctypes.c_void_p),
-        ]
-
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
-    crypt32.CryptProtectData.argtypes = [
-        ctypes.POINTER(DATA_BLOB),
-        wintypes.LPCWSTR,
-        ctypes.POINTER(DATA_BLOB),
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        ctypes.POINTER(DATA_BLOB),
-    ]
-    crypt32.CryptProtectData.restype = wintypes.BOOL
-
-    input_buffer = ctypes.create_string_buffer(payload_bytes, len(payload_bytes))
-    input_blob = DATA_BLOB(len(payload_bytes), ctypes.cast(input_buffer, ctypes.c_void_p))
-    output_blob = DATA_BLOB()
-
-    if not crypt32.CryptProtectData(
-        ctypes.byref(input_blob),
-        None,
-        None,
-        None,
-        None,
-        0,
-        ctypes.byref(output_blob),
-    ):
-        return None
-
-    try:
-        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
-    finally:
-        if output_blob.pbData:
-            kernel32.LocalFree(output_blob.pbData)
-
-
-def _unprotect_employee_name_cache_payload(payload_bytes):
-    if os.name != "nt":
-        return None
-
-    try:
-        import ctypes
-        from ctypes import wintypes
-    except ImportError:
-        return None
-
-    class DATA_BLOB(ctypes.Structure):
-        _fields_ = [
-            ("cbData", wintypes.DWORD),
-            ("pbData", ctypes.c_void_p),
-        ]
-
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
-    crypt32.CryptUnprotectData.argtypes = [
-        ctypes.POINTER(DATA_BLOB),
-        ctypes.POINTER(wintypes.LPWSTR),
-        ctypes.POINTER(DATA_BLOB),
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        ctypes.POINTER(DATA_BLOB),
-    ]
-    crypt32.CryptUnprotectData.restype = wintypes.BOOL
-
-    input_buffer = ctypes.create_string_buffer(payload_bytes, len(payload_bytes))
-    input_blob = DATA_BLOB(len(payload_bytes), ctypes.cast(input_buffer, ctypes.c_void_p))
-    output_blob = DATA_BLOB()
-
-    if not crypt32.CryptUnprotectData(
-        ctypes.byref(input_blob),
-        None,
-        None,
-        None,
-        None,
-        0,
-        ctypes.byref(output_blob),
-    ):
-        return None
-
-    try:
-        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
-    finally:
-        if output_blob.pbData:
-            kernel32.LocalFree(output_blob.pbData)
-
-
 def _build_employee_name_cache_signature(source_paths, filter_mode_value):
     signature_sources = []
-    for raw_path in sorted(source_paths, key=lambda value: normalize_path(value).lower()):
+    for raw_path in source_paths:
         path = normalize_path(raw_path)
         if not path or not os.path.exists(path):
             return None
@@ -1763,23 +1656,29 @@ def _load_employee_name_cache(expected_signature):
     if not os.path.exists(EMPLOYEE_NAME_CACHE_PATH):
         return None
 
-    try:
-        with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
-            file_bytes = cache_file.read()
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    if not file_bytes:
-        return None
-
-    payload_bytes = _unprotect_employee_name_cache_payload(file_bytes)
-    if payload_bytes is None:
-        return None
-
-    try:
-        payload = json.loads(payload_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
+    # Try DPAPI-protected binary first (Windows), then fall back to plain JSON
+    if platform.system() == "Windows" and win32crypt is not None:
+        try:
+            with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
+                encrypted = cache_file.read()
+            if encrypted:
+                try:
+                    # win32crypt.CryptUnprotectData returns a tuple (descr, data)
+                    descr, decrypted = win32crypt.CryptUnprotectData(encrypted, None, None, None, None, 0)
+                    payload = json.loads(decrypted.decode("utf-8"))
+                except Exception:
+                    # If decryption fails, fall through to plain JSON attempt
+                    payload = None
+            else:
+                payload = None
+        except Exception:
+            payload = None
+    else:
+        try:
+            with open(EMPLOYEE_NAME_CACHE_PATH, "r", encoding="utf-8") as cache_file:
+                payload = json.load(cache_file)
+        except (OSError, json.JSONDecodeError):
+            return None
 
     if not isinstance(payload, dict):
         return None
@@ -1811,22 +1710,29 @@ def _save_employee_name_cache(signature, suggestions):
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "suggestions": suggestions,
     }
-    raw_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    protected_payload = _protect_employee_name_cache_payload(raw_payload)
-    if protected_payload is None:
-        return
-
-    temp_path = EMPLOYEE_NAME_CACHE_PATH + ".tmp"
-    try:
-        with open(temp_path, "wb") as cache_file:
-            cache_file.write(protected_payload)
-        os.replace(temp_path, EMPLOYEE_NAME_CACHE_PATH)
-    except OSError:
+    serialized = json.dumps(payload, indent=2).encode("utf-8")
+    if platform.system() == "Windows" and win32crypt is not None:
         try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except OSError:
+            encrypted = win32crypt.CryptProtectData(serialized, None, None, None, None, 0)
+            with open(EMPLOYEE_NAME_CACHE_PATH, "wb") as cache_file:
+                cache_file.write(encrypted)
+            return
+        except Exception:
+            # fall back to plain write
             pass
+
+    # Fallback: plain JSON file (best-effort restricted permissions)
+    try:
+        with open(EMPLOYEE_NAME_CACHE_PATH, "w", encoding="utf-8") as cache_file:
+            json.dump(payload, cache_file, indent=2)
+        try:
+            # Try to restrict file permissions to owner-only where supported
+            if hasattr(os, "chmod"):
+                os.chmod(EMPLOYEE_NAME_CACHE_PATH, 0o600)
+        except Exception:
+            pass
+    except OSError:
+        pass
 
 
 def _normalize_candidate_line(raw_line):
@@ -9369,7 +9275,6 @@ def initialize_settings(progress_callback=None):
     if progress_callback is not None:
         progress_callback("Loading saved settings...", 0, 0)
 
-    _remove_legacy_employee_name_cache()
     load_settings(progress_callback=progress_callback)
     _refresh_update_status()
 
