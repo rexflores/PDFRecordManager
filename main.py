@@ -103,7 +103,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -1612,6 +1612,8 @@ def _resolve_config_path():
 
 
 CONFIG_PATH = _resolve_config_path()
+EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.dat")
+LEGACY_EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.json")
 
 
 def normalize_path(path):
@@ -1620,6 +1622,211 @@ def normalize_path(path):
 
 def _update_employee_list_status(message):
     employee_list_status_var.set(message)
+
+
+def _remove_legacy_employee_name_cache():
+    if not os.path.exists(LEGACY_EMPLOYEE_NAME_CACHE_PATH):
+        return
+    try:
+        os.remove(LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+    except OSError:
+        pass
+
+
+def _protect_employee_name_cache_payload(payload_bytes):
+    if os.name != "nt":
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return None
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.c_void_p),
+        ]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    crypt32.CryptProtectData.argtypes = [
+        ctypes.POINTER(DATA_BLOB),
+        wintypes.LPCWSTR,
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(DATA_BLOB),
+    ]
+    crypt32.CryptProtectData.restype = wintypes.BOOL
+
+    input_buffer = ctypes.create_string_buffer(payload_bytes, len(payload_bytes))
+    input_blob = DATA_BLOB(len(payload_bytes), ctypes.cast(input_buffer, ctypes.c_void_p))
+    output_blob = DATA_BLOB()
+
+    if not crypt32.CryptProtectData(
+        ctypes.byref(input_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(output_blob),
+    ):
+        return None
+
+    try:
+        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
+    finally:
+        if output_blob.pbData:
+            kernel32.LocalFree(output_blob.pbData)
+
+
+def _unprotect_employee_name_cache_payload(payload_bytes):
+    if os.name != "nt":
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return None
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.c_void_p),
+        ]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    crypt32.CryptUnprotectData.argtypes = [
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.POINTER(wintypes.LPWSTR),
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(DATA_BLOB),
+    ]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
+
+    input_buffer = ctypes.create_string_buffer(payload_bytes, len(payload_bytes))
+    input_blob = DATA_BLOB(len(payload_bytes), ctypes.cast(input_buffer, ctypes.c_void_p))
+    output_blob = DATA_BLOB()
+
+    if not crypt32.CryptUnprotectData(
+        ctypes.byref(input_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(output_blob),
+    ):
+        return None
+
+    try:
+        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
+    finally:
+        if output_blob.pbData:
+            kernel32.LocalFree(output_blob.pbData)
+
+
+def _build_employee_name_cache_signature(source_paths, filter_mode_value):
+    signature_sources = []
+    for raw_path in sorted(source_paths, key=lambda value: normalize_path(value).lower()):
+        path = normalize_path(raw_path)
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            stats = os.stat(path)
+        except OSError:
+            return None
+
+        signature_sources.append({
+            "path": os.path.normcase(os.path.abspath(path)),
+            "size": stats.st_size,
+            "mtime_ns": getattr(stats, "st_mtime_ns", int(stats.st_mtime * 1_000_000_000)),
+        })
+
+    payload = {
+        "filter_mode": filter_mode_value,
+        "sources": signature_sources,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _load_employee_name_cache(expected_signature):
+    if not os.path.exists(EMPLOYEE_NAME_CACHE_PATH):
+        return None
+
+    try:
+        with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
+            file_bytes = cache_file.read()
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not file_bytes:
+        return None
+
+    payload_bytes = _unprotect_employee_name_cache_payload(file_bytes)
+    if payload_bytes is None:
+        return None
+
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("signature") != expected_signature:
+        return None
+
+    cached_names = payload.get("suggestions", [])
+    if not isinstance(cached_names, list):
+        return None
+
+    cleaned = []
+    seen = set()
+    for entry in cached_names:
+        value = _normalize_candidate_line(str(entry))
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(value)
+
+    return sorted(cleaned, key=lambda value: value.lower())
+
+
+def _save_employee_name_cache(signature, suggestions):
+    payload = {
+        "signature": signature,
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "suggestions": suggestions,
+    }
+    raw_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    protected_payload = _protect_employee_name_cache_payload(raw_payload)
+    if protected_payload is None:
+        return
+
+    temp_path = EMPLOYEE_NAME_CACHE_PATH + ".tmp"
+    try:
+        with open(temp_path, "wb") as cache_file:
+            cache_file.write(protected_payload)
+        os.replace(temp_path, EMPLOYEE_NAME_CACHE_PATH)
+    except OSError:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
 
 
 def _normalize_candidate_line(raw_line):
@@ -2117,9 +2324,22 @@ def load_employee_name_suggestions(progress_callback=None):
             progress_callback("No employee sources selected.", 1, 1)
         return
 
+    total_sources = len(employee_source_paths)
+    filter_mode_value = name_filter_mode.get()
+    cache_signature = _build_employee_name_cache_signature(employee_source_paths, filter_mode_value)
+    if cache_signature is not None:
+        cached_suggestions = _load_employee_name_cache(cache_signature)
+        if cached_suggestions is not None:
+            employee_name_suggestions = cached_suggestions
+            msg = f"{len(employee_name_suggestions)} names loaded from cache ({len(employee_source_paths)} source(s))."
+            if progress_callback is not None:
+                progress_callback("Loaded employee names from cache.", total_sources, total_sources)
+            filter_label = "Strict" if filter_mode_value == "strict" else "Lenient"
+            _update_employee_list_status(f"{msg} (Filter: {filter_label}).")
+            return
+
     suggestions = set()
     errors = []
-    total_sources = len(employee_source_paths)
 
     if progress_callback is not None:
         progress_callback("Reading employee name sources...", 0, total_sources)
@@ -2181,6 +2401,9 @@ def load_employee_name_suggestions(progress_callback=None):
     filter_label = "Strict" if name_filter_mode.get() == "strict" else "Lenient"
     msg += f" (Filter: {filter_label})."
     _update_employee_list_status(msg)
+
+    if cache_signature is not None:
+        _save_employee_name_cache(cache_signature, employee_name_suggestions)
 
     if progress_callback is not None:
         progress_callback("Employee names loaded.", total_sources, total_sources)
@@ -9146,6 +9369,7 @@ def initialize_settings(progress_callback=None):
     if progress_callback is not None:
         progress_callback("Loading saved settings...", 0, 0)
 
+    _remove_legacy_employee_name_cache()
     load_settings(progress_callback=progress_callback)
     _refresh_update_status()
 
