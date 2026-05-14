@@ -1679,7 +1679,7 @@ def _load_employee_name_cache(expected_signature):
         try:
             with open(EMPLOYEE_NAME_CACHE_PATH, "r", encoding="utf-8") as cache_file:
                 payload = json.load(cache_file)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
 
     if not isinstance(payload, dict):
