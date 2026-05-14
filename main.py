@@ -11,6 +11,12 @@ import platform
 import threading
 import urllib.request
 import math
+import time
+import gzip
+import getpass
+import ctypes
+from ctypes import wintypes
+import signal
 from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -44,19 +50,78 @@ except ImportError:
     send2trash = None
 
 try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ImportError:
+    AESGCM = None
+
+try:
     from win10toast import ToastNotifier as Win10ToastNotifier
 except ImportError:
     Win10ToastNotifier = None
 
 try:
-    import win32crypt
-except Exception:
-    win32crypt = None
-
-try:
     from winotify import Notification as WinotifyNotification
 except ImportError:
     WinotifyNotification = None
+
+
+BUTTON_COMMAND_DEBOUNCE_MS = 350
+
+
+def _wrap_debounced_callback(callback, debounce_ms=BUTTON_COMMAND_DEBOUNCE_MS):
+    last_invocation = [0.0]
+
+    def _debounced_callback(*args, **kwargs):
+        now = time.monotonic()
+        if now - last_invocation[0] < (debounce_ms / 1000.0):
+            return None
+        last_invocation[0] = now
+        return callback(*args, **kwargs)
+
+    return _debounced_callback
+
+
+class _DebouncedButton(ttk.Button):
+    def __init__(self, *args, **kwargs):
+        if "command" in kwargs and kwargs["command"] is not None:
+            kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+        super().__init__(*args, **kwargs)
+
+    def configure(self, cnf=None, **kwargs):
+        if "command" in kwargs and kwargs["command"] is not None:
+            kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+        return super().configure(cnf, **kwargs)
+
+    config = configure
+
+
+_ORIGINAL_MENU_ADD_COMMAND = tk.Menu.add_command
+_ORIGINAL_MENU_ADD_CHECKBUTTON = tk.Menu.add_checkbutton
+_ORIGINAL_MENU_ADD_RADIOBUTTON = tk.Menu.add_radiobutton
+
+
+def _debounced_menu_add_command(self, *args, **kwargs):
+    if "command" in kwargs and kwargs["command"] is not None:
+        kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+    return _ORIGINAL_MENU_ADD_COMMAND(self, *args, **kwargs)
+
+
+def _debounced_menu_add_checkbutton(self, *args, **kwargs):
+    if "command" in kwargs and kwargs["command"] is not None:
+        kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+    return _ORIGINAL_MENU_ADD_CHECKBUTTON(self, *args, **kwargs)
+
+
+def _debounced_menu_add_radiobutton(self, *args, **kwargs):
+    if "command" in kwargs and kwargs["command"] is not None:
+        kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+    return _ORIGINAL_MENU_ADD_RADIOBUTTON(self, *args, **kwargs)
+
+
+ttk.Button = _DebouncedButton
+tk.Menu.add_command = _debounced_menu_add_command
+tk.Menu.add_checkbutton = _debounced_menu_add_checkbutton
+tk.Menu.add_radiobutton = _debounced_menu_add_radiobutton
 
 try:
     pdfplumber = importlib.import_module("pdfplumber")
@@ -108,7 +173,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.0"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -1491,6 +1556,12 @@ auto_refresh_var = tk.BooleanVar(value=True)
 tray_notifications_enabled_var = tk.BooleanVar(value=True)
 keep_backup_preference_var = tk.BooleanVar(value=False)
 show_text_with_icons_var = tk.BooleanVar(value=False)
+confirm_save_folder_exists_var = tk.BooleanVar(value=True)
+confirm_save_action_var = tk.BooleanVar(value=True)
+confirm_merge_main_var = tk.BooleanVar(value=True)
+confirm_merge_folder_exists_var = tk.BooleanVar(value=True)
+confirm_merge_replace_var = tk.BooleanVar(value=True)
+confirm_merge_recycle_var = tk.BooleanVar(value=True)
 
 employee_sources_listbox = None
 employee_source_paths = []
@@ -1543,6 +1614,43 @@ preferences_menu.add_checkbutton(
     variable=keep_backup_preference_var,
     command=lambda: _on_keep_backup_preference_changed(),
 )
+
+save_prompts_menu = tk.Menu(preferences_menu, tearoff=0)
+save_prompts_menu.add_checkbutton(
+    label="Confirm folder exists",
+    variable=confirm_save_folder_exists_var,
+    command=lambda: _on_confirm_preferences_changed(),
+)
+save_prompts_menu.add_checkbutton(
+    label="Confirm save action",
+    variable=confirm_save_action_var,
+    command=lambda: _on_confirm_preferences_changed(),
+)
+preferences_menu.add_cascade(label="Save Confirmations", menu=save_prompts_menu)
+
+merge_prompts_menu = tk.Menu(preferences_menu, tearoff=0)
+merge_prompts_menu.add_checkbutton(
+    label="Confirm merge action",
+    variable=confirm_merge_main_var,
+    command=lambda: _on_confirm_preferences_changed(),
+)
+merge_prompts_menu.add_checkbutton(
+    label="Confirm folder exists",
+    variable=confirm_merge_folder_exists_var,
+    command=lambda: _on_confirm_preferences_changed(),
+)
+merge_prompts_menu.add_checkbutton(
+    label="Confirm replace file",
+    variable=confirm_merge_replace_var,
+    command=lambda: _on_confirm_preferences_changed(),
+)
+merge_prompts_menu.add_checkbutton(
+    label="Confirm recycle original",
+    variable=confirm_merge_recycle_var,
+    command=lambda: _on_confirm_preferences_changed(),
+)
+preferences_menu.add_cascade(label="Merge Confirmations", menu=merge_prompts_menu)
+
 preferences_menu.add_checkbutton(
     label="Show text with icons",
     variable=show_text_with_icons_var,
@@ -1566,6 +1674,7 @@ file_menu.add_cascade(label="Preference", menu=preferences_menu)
 
 application_menu = tk.Menu(file_menu, tearoff=0)
 application_menu.add_command(label="Restart", command=lambda: restart_application())
+application_menu.add_separator()
 backup_cleanup_menu = tk.Menu(application_menu, tearoff=0)
 backup_cleanup_menu.add_command(
     label="All (Records Root + Pending)",
@@ -1585,6 +1694,8 @@ backup_cleanup_menu.add_command(
     command=lambda: clear_selected_employee_folder_backups(),
 )
 application_menu.add_cascade(label="Clear Backup Folders", menu=backup_cleanup_menu)
+application_menu.add_separator()
+application_menu.add_command(label="Clear Name Cache", command=lambda: clear_employee_name_cache())
 application_menu.add_separator()
 application_menu.add_command(label="Exit", command=lambda: exit_application())
 file_menu.add_cascade(label="Application", menu=application_menu)
@@ -1617,7 +1728,12 @@ def _resolve_config_path():
 
 
 CONFIG_PATH = _resolve_config_path()
-EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.json")
+EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.enc")
+EMPLOYEE_NAME_CACHE_KEY_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.key")
+LEGACY_EMPLOYEE_NAME_CACHE_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "employee_name_cache.json")
+EMPLOYEE_NAME_CACHE_MAGIC = b"PDFATK1"
+EMPLOYEE_NAME_CACHE_VERSION = 1
+EMPLOYEE_NAME_CACHE_AAD = b"PDFRecordManager::employee_name_cache::v1"
 
 
 def normalize_path(path):
@@ -1626,6 +1742,112 @@ def normalize_path(path):
 
 def _update_employee_list_status(message):
     employee_list_status_var.set(message)
+
+
+class _CacheBlob(ctypes.Structure):
+    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+
+def _bytes_to_blob(data):
+    buffer = ctypes.create_string_buffer(data)
+    blob = _CacheBlob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
+    return blob, buffer
+
+
+def _blob_to_bytes(blob):
+    return ctypes.string_at(blob.pbData, blob.cbData)
+
+
+def _protect_cache_key_material(key_bytes):
+    if os.name != "nt":
+        return key_bytes
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    input_blob, input_buffer = _bytes_to_blob(key_bytes)
+    output_blob = _CacheBlob()
+
+    if not crypt32.CryptProtectData(
+        ctypes.byref(input_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(output_blob),
+    ):
+        raise ctypes.WinError()
+
+    try:
+        return _blob_to_bytes(output_blob)
+    finally:
+        kernel32.LocalFree(output_blob.pbData)
+
+
+def _unprotect_cache_key_material(protected_bytes):
+    if os.name != "nt":
+        return protected_bytes
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    input_blob, input_buffer = _bytes_to_blob(protected_bytes)
+    output_blob = _CacheBlob()
+
+    if not crypt32.CryptUnprotectData(
+        ctypes.byref(input_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(output_blob),
+    ):
+        raise ctypes.WinError()
+
+    try:
+        return _blob_to_bytes(output_blob)
+    finally:
+        kernel32.LocalFree(output_blob.pbData)
+
+
+def _remove_employee_name_cache_files(remove_key=False, remove_primary=True, remove_legacy=True):
+    cache_paths = []
+    if remove_primary:
+        cache_paths.append(EMPLOYEE_NAME_CACHE_PATH)
+    if remove_legacy:
+        cache_paths.append(LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+    if remove_key:
+        cache_paths.append(EMPLOYEE_NAME_CACHE_KEY_PATH)
+
+    for cache_path in cache_paths:
+        if not cache_path or not os.path.exists(cache_path):
+            continue
+
+        try:
+            if os.name == "nt":
+                try:
+                    FILE_ATTRIBUTE_NORMAL = 0x80
+                    ctypes.windll.kernel32.SetFileAttributesW(cache_path, FILE_ATTRIBUTE_NORMAL)
+                except Exception:
+                    pass
+                try:
+                    username = getpass.getuser()
+                    subprocess.run([
+                        "icacls",
+                        cache_path,
+                        "/grant:r",
+                        f"{username}:F",
+                    ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+
+            os.remove(cache_path)
+        except Exception:
+            try:
+                os.chmod(cache_path, 0o600)
+                os.remove(cache_path)
+            except Exception:
+                pass
 
 
 def _build_employee_name_cache_signature(source_paths, filter_mode_value):
@@ -1652,34 +1874,37 @@ def _build_employee_name_cache_signature(source_paths, filter_mode_value):
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _load_employee_name_cache(expected_signature):
-    if not os.path.exists(EMPLOYEE_NAME_CACHE_PATH):
+def _load_legacy_employee_name_cache(expected_signature):
+    if not os.path.exists(LEGACY_EMPLOYEE_NAME_CACHE_PATH):
         return None
 
-    # Try DPAPI-protected binary first (Windows), then fall back to plain JSON
-    payload = None
-    if platform.system() == "Windows" and win32crypt is not None:
+    # Legacy formats: old gzip JSON cache or plain JSON fallback.
+    try:
+        with gzip.open(LEGACY_EMPLOYEE_NAME_CACHE_PATH, "rb") as f:
+            raw = f.read().decode("utf-8", errors="replace")
+        payload = json.loads(raw)
+    except Exception:
+        raw_text = None
         try:
-            with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
-                encrypted = cache_file.read()
-            if encrypted:
+            with open(LEGACY_EMPLOYEE_NAME_CACHE_PATH, "r", encoding="utf-8") as cache_file:
+                raw_text = cache_file.read()
+        except UnicodeDecodeError:
+            try:
+                with open(LEGACY_EMPLOYEE_NAME_CACHE_PATH, "r", encoding="latin-1") as cache_file:
+                    raw_text = cache_file.read()
+            except Exception:
                 try:
-                    # win32crypt.CryptUnprotectData returns a tuple (descr, data)
-                    descr, decrypted = win32crypt.CryptUnprotectData(encrypted, None, None, None, None, 0)
-                    payload = json.loads(decrypted.decode("utf-8"))
+                    with open(LEGACY_EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
+                        raw_bytes = cache_file.read()
+                    raw_text = raw_bytes.decode("utf-8", errors="replace")
                 except Exception:
-                    # If decryption fails, fall through to plain JSON attempt
-                    payload = None
-            else:
-                payload = None
-        except Exception:
-            payload = None
+                    return None
+        except OSError:
+            return None
 
-    if payload is None:
         try:
-            with open(EMPLOYEE_NAME_CACHE_PATH, "r", encoding="utf-8") as cache_file:
-                payload = json.load(cache_file)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = json.loads(raw_text)
+        except (json.JSONDecodeError, TypeError):
             return None
 
     if not isinstance(payload, dict):
@@ -1706,37 +1931,175 @@ def _load_employee_name_cache(expected_signature):
     return sorted(cleaned, key=lambda value: value.lower())
 
 
+def _load_employee_name_cache(expected_signature):
+    if AESGCM is None:
+        return _load_legacy_employee_name_cache(expected_signature)
+
+    if not os.path.exists(EMPLOYEE_NAME_CACHE_PATH):
+        legacy_payload = _load_legacy_employee_name_cache(expected_signature)
+        if legacy_payload is not None:
+            try:
+                _save_employee_name_cache(expected_signature, legacy_payload)
+                _remove_employee_name_cache_files(remove_key=False, remove_primary=False, remove_legacy=True)
+            except Exception:
+                pass
+        return legacy_payload
+
+    try:
+        with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
+            raw_cache = cache_file.read()
+    except OSError:
+        return None
+
+    if not raw_cache.startswith(EMPLOYEE_NAME_CACHE_MAGIC):
+        legacy_payload = _load_legacy_employee_name_cache(expected_signature)
+        if legacy_payload is not None:
+            try:
+                _save_employee_name_cache(expected_signature, legacy_payload)
+                _remove_employee_name_cache_files(remove_key=False, remove_primary=False, remove_legacy=True)
+            except Exception:
+                pass
+        return legacy_payload
+
+    minimum_header_size = len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 + 12
+    if len(raw_cache) <= minimum_header_size:
+        return None
+
+    version = raw_cache[len(EMPLOYEE_NAME_CACHE_MAGIC)]
+    if version != EMPLOYEE_NAME_CACHE_VERSION:
+        return None
+
+    nonce = raw_cache[len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 : len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 + 12]
+    ciphertext = raw_cache[len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 + 12 :]
+
+    try:
+        key_bytes = _load_or_create_employee_name_cache_key()
+        plaintext = AESGCM(key_bytes).decrypt(nonce, ciphertext, EMPLOYEE_NAME_CACHE_AAD)
+        payload = json.loads(plaintext.decode("utf-8"))
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("signature") != expected_signature:
+        return None
+
+    cached_names = payload.get("suggestions", [])
+    if not isinstance(cached_names, list):
+        return None
+
+    cleaned = []
+    seen = set()
+    for entry in cached_names:
+        value = _normalize_candidate_line(str(entry))
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(value)
+
+    return sorted(cleaned, key=lambda value: value.lower())
+
+
+def _load_or_create_employee_name_cache_key():
+    if os.path.exists(EMPLOYEE_NAME_CACHE_KEY_PATH):
+        try:
+            with open(EMPLOYEE_NAME_CACHE_KEY_PATH, "rb") as key_file:
+                protected_key = key_file.read()
+            if not protected_key:
+                raise ValueError("Empty key file")
+            return _unprotect_cache_key_material(protected_key)
+        except Exception:
+            pass
+
+    key_bytes = os.urandom(32)
+    protected_key = _protect_cache_key_material(key_bytes)
+    tmp_path = EMPLOYEE_NAME_CACHE_KEY_PATH + ".tmp"
+    try:
+        with open(tmp_path, "wb") as key_file:
+            key_file.write(protected_key)
+        os.replace(tmp_path, EMPLOYEE_NAME_CACHE_KEY_PATH)
+
+        if os.name == "nt":
+            try:
+                username = getpass.getuser()
+                subprocess.run([
+                    "icacls",
+                    EMPLOYEE_NAME_CACHE_KEY_PATH,
+                    "/inheritance:r",
+                    "/grant:r",
+                    f"{username}:F",
+                ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                FILE_ATTRIBUTE_HIDDEN = 0x2
+                FILE_ATTRIBUTE_READONLY = 0x1
+                try:
+                    ctypes.windll.kernel32.SetFileAttributesW(
+                        EMPLOYEE_NAME_CACHE_KEY_PATH,
+                        FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY,
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+    return key_bytes
+
+
 def _save_employee_name_cache(signature, suggestions):
     payload = {
         "signature": signature,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "suggestions": suggestions,
     }
-    serialized = json.dumps(payload, indent=2).encode("utf-8")
-    if platform.system() == "Windows" and win32crypt is not None:
-        try:
-            encrypted = win32crypt.CryptProtectData(serialized, None, None, None, None, 0)
-            if isinstance(encrypted, tuple):
-                encrypted = encrypted[1] if len(encrypted) > 1 else encrypted[0]
-            with open(EMPLOYEE_NAME_CACHE_PATH, "wb") as cache_file:
-                cache_file.write(encrypted)
-            return
-        except Exception:
-            # fall back to plain write
-            pass
-
-    # Fallback: plain JSON file (best-effort restricted permissions)
+    tmp_path = EMPLOYEE_NAME_CACHE_PATH + ".tmp"
     try:
-        with open(EMPLOYEE_NAME_CACHE_PATH, "w", encoding="utf-8") as cache_file:
-            json.dump(payload, cache_file, indent=2)
+        if AESGCM is None:
+            return
+
+        key_bytes = _load_or_create_employee_name_cache_key()
+        nonce = os.urandom(12)
+        plaintext = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, EMPLOYEE_NAME_CACHE_AAD)
+
+        with open(tmp_path, "wb") as f:
+            f.write(EMPLOYEE_NAME_CACHE_MAGIC)
+            f.write(bytes([EMPLOYEE_NAME_CACHE_VERSION]))
+            f.write(nonce)
+            f.write(ciphertext)
+        os.replace(tmp_path, EMPLOYEE_NAME_CACHE_PATH)
+
+        # On Windows, mark hidden + readonly and restrict ACL to current user
+        if os.name == "nt":
+            try:
+                username = getpass.getuser()
+                # Remove inherited permissions and grant current user full control
+                subprocess.run([
+                    "icacls",
+                    EMPLOYEE_NAME_CACHE_PATH,
+                    "/inheritance:r",
+                    "/grant:r",
+                    f"{username}:F",
+                ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                FILE_ATTRIBUTE_HIDDEN = 0x2
+                FILE_ATTRIBUTE_READONLY = 0x1
+                try:
+                    ctypes.windll.kernel32.SetFileAttributesW(EMPLOYEE_NAME_CACHE_PATH, FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    except OSError:
         try:
-            # Try to restrict file permissions to owner-only where supported
-            if hasattr(os, "chmod"):
-                os.chmod(EMPLOYEE_NAME_CACHE_PATH, 0o600)
+            os.remove(tmp_path)
         except Exception:
             pass
-    except OSError:
-        pass
 
 
 def _normalize_candidate_line(raw_line):
@@ -2341,7 +2704,7 @@ def _refresh_employee_sources_selection_count(_event=None):
     )
 
 
-def _set_employee_sources(paths, persist=False, progress_callback=None):
+def _set_employee_sources(paths, persist=False, progress_callback=None, invalidate_cache=False):
     global employee_source_paths
     normalized = []
     for raw_path in paths:
@@ -2350,6 +2713,16 @@ def _set_employee_sources(paths, persist=False, progress_callback=None):
             normalized.append(path)
     employee_source_paths = normalized
     _refresh_employee_sources_listbox()
+    if invalidate_cache:
+        # When sources change via the UI, invalidate any existing name cache so
+        # the next startup or reload reflects the updated source list.
+        try:
+            _remove_employee_name_cache_files(remove_key=False, remove_primary=True, remove_legacy=True)
+        except Exception:
+            pass
+
+    # Reload suggestions now so the in-memory list and saved cache (if any)
+    # reflect the new source configuration.
     load_employee_name_suggestions(progress_callback=progress_callback)
     if persist:
         save_settings()
@@ -2369,24 +2742,54 @@ def _normalize_name_for_search(value):
     return " ".join((value or "").lower().replace(",", " ").split())
 
 
+def _tokenize_name_search_value(value):
+    normalized_value = _normalize_name_for_search(value)
+    if not normalized_value:
+        return []
+    return [token for token in re.split(r"[^a-z0-9]+", normalized_value) if token]
+
+
+def _name_search_matches(query_tokens, candidate_tokens):
+    if not query_tokens:
+        return True
+    if not candidate_tokens:
+        return False
+
+    for query_token in query_tokens:
+        if not any(
+            candidate_token.startswith(query_token) or query_token in candidate_token
+            for candidate_token in candidate_tokens
+        ):
+            return False
+    return True
+
+
 def get_filtered_name_suggestions(prefix):
     if not employee_name_suggestions:
         return []
-    normalized_query = _normalize_name_for_search(prefix)
-    if not normalized_query:
+    query_tokens = _tokenize_name_search_value(prefix)
+    if not query_tokens:
         return employee_name_suggestions
 
-    prefix_matches = []
-    contains_matches = []
+    exact_matches = []
+    ordered_matches = []
+    unordered_matches = []
 
     for name in employee_name_suggestions:
-        searchable = _normalize_name_for_search(name)
-        if searchable.startswith(normalized_query):
-            prefix_matches.append(name)
-        elif normalized_query in searchable:
-            contains_matches.append(name)
+        candidate_tokens = _tokenize_name_search_value(name)
+        if not _name_search_matches(query_tokens, candidate_tokens):
+            continue
 
-    return prefix_matches + contains_matches
+        searchable = _normalize_name_for_search(name)
+        normalized_query = _normalize_name_for_search(prefix)
+        if searchable == normalized_query:
+            exact_matches.append(name)
+        elif searchable.startswith(normalized_query):
+            ordered_matches.append(name)
+        else:
+            unordered_matches.append(name)
+
+    return exact_matches + ordered_matches + unordered_matches
 
 
 def _get_suggestion_popup_state(combobox):
@@ -2893,7 +3296,6 @@ def show_about_dialog():
     os_name = os.environ.get("OS") or platform.system() or "unknown"
     architecture = platform.machine() or "unknown"
     os_version = platform.version() or "unknown"
-    update_feed_value = DEFAULT_UPDATE_MANIFEST_URL.strip() or "Unavailable in this build"
 
     details = [
         "App: PDF Record Manager",
@@ -2901,8 +3303,6 @@ def show_about_dialog():
         f"Install Type: {_get_installation_scope()}",
         f"Build Commit: {build_metadata.get('commit', 'unknown')}",
         f"Build Date: {_get_about_date_text()}",
-        f"Update Feed: {update_feed_value}",
-        f"Python Runtime: {platform.python_version()}",
         f"OS: {os_name} {architecture} {os_version}",
     ]
 
@@ -3058,6 +3458,12 @@ def load_settings(progress_callback=None):
     sources_value = data.get("employee_sources", [])
     filter_value = data.get("name_filter_mode", name_filter_mode.get())
     backup_pref_value = data.get("keep_backup_before_replace", False)
+    confirm_save_folder_exists_value = data.get("confirm_save_folder_exists", True)
+    confirm_save_action_value = data.get("confirm_save_action", True)
+    confirm_merge_main_value = data.get("confirm_merge_main", True)
+    confirm_merge_folder_exists_value = data.get("confirm_merge_folder_exists", True)
+    confirm_merge_replace_value = data.get("confirm_merge_replace", True)
+    confirm_merge_recycle_value = data.get("confirm_merge_recycle", True)
     auto_refresh_value = data.get("auto_refresh_pending_files", auto_refresh_var.get())
     tray_notifications_value = data.get(
         "tray_notifications_enabled",
@@ -3093,6 +3499,12 @@ def load_settings(progress_callback=None):
             _suppress_name_filter_refresh = False
 
     keep_backup_preference_var.set(bool(backup_pref_value))
+    confirm_save_folder_exists_var.set(bool(confirm_save_folder_exists_value))
+    confirm_save_action_var.set(bool(confirm_save_action_value))
+    confirm_merge_main_var.set(bool(confirm_merge_main_value))
+    confirm_merge_folder_exists_var.set(bool(confirm_merge_folder_exists_value))
+    confirm_merge_replace_var.set(bool(confirm_merge_replace_value))
+    confirm_merge_recycle_var.set(bool(confirm_merge_recycle_value))
     auto_refresh_var.set(bool(auto_refresh_value))
     tray_notifications_enabled_var.set(bool(tray_notifications_value))
     show_text_with_icons_var.set(bool(show_text_with_icons_value))
@@ -3119,7 +3531,7 @@ def load_settings(progress_callback=None):
     except (TypeError, ValueError):
         pass
 
-    _set_employee_sources(sources_value or [], persist=False, progress_callback=progress_callback)
+    _set_employee_sources(sources_value or [], persist=False, progress_callback=progress_callback, invalidate_cache=False)
     _update_icon_button_labels()
     _refresh_update_status()
 
@@ -3131,6 +3543,12 @@ def save_settings():
         "employee_sources": employee_source_paths,
         "name_filter_mode": name_filter_mode.get(),
         "keep_backup_before_replace": keep_backup_preference_var.get(),
+        "confirm_save_folder_exists": confirm_save_folder_exists_var.get(),
+        "confirm_save_action": confirm_save_action_var.get(),
+        "confirm_merge_main": confirm_merge_main_var.get(),
+        "confirm_merge_folder_exists": confirm_merge_folder_exists_var.get(),
+        "confirm_merge_replace": confirm_merge_replace_var.get(),
+        "confirm_merge_recycle": confirm_merge_recycle_var.get(),
         "auto_refresh_pending_files": auto_refresh_var.get(),
         "tray_notifications_enabled": tray_notifications_enabled_var.get(),
         "show_text_with_icons": show_text_with_icons_var.get(),
@@ -3143,6 +3561,30 @@ def save_settings():
             json.dump(data, config_file, indent=2)
     except OSError:
         pass
+
+
+def _confirm_save_yesno(title, message, parent=None):
+    if not confirm_save_action_var.get():
+        return True
+    return messagebox.askyesno(title, message, parent=parent)
+
+
+def _confirm_save_yesnocancel(title, message, parent=None):
+    if not confirm_save_folder_exists_var.get():
+        return True
+    return messagebox.askyesnocancel(title, message, parent=parent)
+
+
+def _confirm_merge_yesno(title, message, parent=None):
+    if title == "Confirm Merge" and not confirm_merge_main_var.get():
+        return True
+    elif title == "Folder Already Exists" and not confirm_merge_folder_exists_var.get():
+        return True
+    elif title == "Replace File" and not confirm_merge_replace_var.get():
+        return True
+    elif title == "Recycle Original?" and not confirm_merge_recycle_var.get():
+        return True
+    return messagebox.askyesno(title, message, parent=parent)
 
 
 def exit_application():
@@ -3975,6 +4417,7 @@ def select_root_folder():
 def _apply_employee_sources_with_progress(
     paths,
     persist,
+    invalidate_cache=False,
     title="Loading Employee Sources",
     heading="Parsing employee source files",
     initial_status="Preparing selected sources...",
@@ -3999,6 +4442,7 @@ def _apply_employee_sources_with_progress(
         _set_employee_sources(
             paths,
             persist=persist,
+            invalidate_cache=invalidate_cache,
             progress_callback=lambda message, current=None, total=None: _update_startup_loading_ui(
                 loading_win,
                 loading_status_var,
@@ -4035,6 +4479,7 @@ def select_employee_sources():
     _apply_employee_sources_with_progress(
         new_paths,
         persist=True,
+        invalidate_cache=True,
         title="Loading Employee Sources",
         heading="Parsing employee source files",
         initial_status="Preparing selected sources...",
@@ -4053,6 +4498,7 @@ def remove_selected_employee_source():
     _apply_employee_sources_with_progress(
         remaining,
         persist=True,
+        invalidate_cache=True,
         title="Updating Employee Sources",
         heading="Refreshing source list",
         initial_status="Applying selected removals...",
@@ -4067,6 +4513,7 @@ def clear_employee_sources():
         _apply_employee_sources_with_progress(
             [],
             persist=True,
+            invalidate_cache=True,
             title="Clearing Employee Sources",
             heading="Removing all source files",
             initial_status="Clearing source list...",
@@ -4293,6 +4740,10 @@ def _on_tray_notifications_preference_changed():
 
 
 def _on_keep_backup_preference_changed():
+    save_settings()
+
+
+def _on_confirm_preferences_changed():
     save_settings()
 
 
@@ -6318,10 +6769,10 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         target_folder = normalize_path(os.path.join(root_path, status, letter, name))
 
         if os.path.exists(target_folder):
-            choice = messagebox.askyesnocancel(
+            choice = _confirm_save_yesnocancel(
                 "Folder Exists",
                 f"The destination folder already exists:\n{target_folder}\n\n"
-                "Yes = continue saving\nNo = open folder to review\nCancel = keep editing"
+                "Yes = continue saving\nNo = open folder to review\nCancel = keep editing",
             )
             if choice is None:
                 return
@@ -6343,9 +6794,9 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             messagebox.showerror("Error", "File already exists.")
             return
 
-        confirm = messagebox.askyesno(
+        confirm = _confirm_save_yesno(
             "Confirm Save",
-            f"Convert {filename}\ninto {new_filename}\nand move it to:\n{target_folder}"
+            f"Convert {filename}\ninto {new_filename}\nand move it to:\n{target_folder}",
         )
         if not confirm:
             return
@@ -6380,7 +6831,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             return
 
         processed_successfully = True
-        messagebox.showinfo("Success", "File saved successfully.")
+        messagebox.showinfo("Success", "File saved successfully.", parent=win)
 
         close_window()
         load_pending_files()
@@ -7270,7 +7721,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         summary_snapshot = merge_summary_var.get().strip()
         if summary_snapshot:
             confirm_text += f"\n\n{summary_snapshot}"
-        if not messagebox.askyesno("Confirm Merge", confirm_text):
+        if not _confirm_merge_yesno("Confirm Merge", confirm_text, parent=win):
             return
 
         if folder_change_requested:
@@ -7285,7 +7736,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
                 return
 
             if os.path.exists(target_folder):
-                move_choice = messagebox.askyesno(
+                move_choice = _confirm_merge_yesno(
                     "Folder Already Exists",
                     (
                         "The destination employee folder already exists.\n\n"
@@ -7367,16 +7818,18 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             merge_pdf_files(pending_path, existing_path, temp_path)
 
             if os.path.exists(final_path) and final_path != existing_path:
-                replace = messagebox.askyesno(
+                replace = _confirm_merge_yesno(
                     "Replace File",
-                    f"{final_filename} already exists. Do you want to replace it?"
+                    f"{final_filename} already exists. Do you want to replace it?",
+                    parent=win,
                 )
                 if not replace:
                     return
 
-            recycle_choice = messagebox.askyesno(
+            recycle_choice = _confirm_merge_yesno(
                 "Recycle Original?",
-                "Move the previously existing PDF to the Recycle Bin after saving?"
+                "Move the previously existing PDF to the Recycle Bin after saving?",
+                parent=win,
             )
 
             warned_recycle_missing = False
@@ -7407,7 +7860,8 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
                         if not warned_recycle_missing:
                             messagebox.showwarning(
                                 "Recycle Unavailable",
-                                "send2trash is not installed; deleting the original file instead."
+                                "send2trash is not installed; deleting the original file instead.",
+                                parent=win
                             )
                             warned_recycle_missing = True
                         os.remove(target_path)
@@ -7436,11 +7890,12 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             except OSError as exc:
                 messagebox.showwarning(
                     "Warning",
-                    f"Merged successfully but unable to archive pending file: {exc}"
+                    f"Merged successfully but unable to archive pending file: {exc}",
+                    parent=win
                 )
 
             processed_successfully = True
-            messagebox.showinfo("Success", f"Merged file saved to:\n{final_path}")
+            messagebox.showinfo("Success", f"Merged file saved to:\n{final_path}", parent=win)
             load_pending_files()
             close_merge_window()
         except Exception as exc:
@@ -9448,6 +9903,25 @@ view_parsed_names_button.pack(side="left", padx=6)
 _configure_icon_button(view_parsed_names_button, "preview", TOOLBAR_ICON_PREVIEW, "View Parsed")
 _attach_hover_tooltip(view_parsed_names_button, "View all parsed employee names")
 
+# Clear name cache button
+def clear_employee_name_cache():
+    if not os.path.exists(EMPLOYEE_NAME_CACHE_PATH) and not os.path.exists(LEGACY_EMPLOYEE_NAME_CACHE_PATH):
+        messagebox.showinfo("Clear Name Cache", "No name cache was found.", parent=root)
+        return
+    confirm = messagebox.askyesno(
+        "Clear Name Cache",
+        "Delete the cached parsed employee names? This will force re-parsing of your sources on next load.",
+        parent=root,
+    )
+    if not confirm:
+        return
+    try:
+        _remove_employee_name_cache_files(remove_key=True, remove_primary=True, remove_legacy=True)
+    except Exception as exc:
+        messagebox.showwarning("Clear Name Cache", f"Unable to delete cache: {exc}", parent=root)
+        return
+    messagebox.showinfo("Clear Name Cache", "Employee name cache cleared.", parent=root)
+
 employee_sources_status_surface = ttk.Frame(names_card, style="StatusSurface.TFrame", padding=(8, 6))
 employee_sources_status_surface.pack(fill="x", pady=(6, 0))
 ttk.Label(
@@ -9610,5 +10084,33 @@ def _run_startup_sequence():
 _center_window_to_current_size(root)
 root.after(10, _run_startup_sequence)
 
-# Run App
-root.mainloop()
+# Run App with graceful SIGINT handling
+try:
+    try:
+        # Attempt to handle Ctrl+C cleanly by quitting the Tk event loop
+        def _sigint_handler(sig, frame):
+            try:
+                root.quit()
+            except Exception:
+                pass
+
+        signal.signal(signal.SIGINT, _sigint_handler)
+    except Exception:
+        pass
+
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        # Some environments still raise KeyboardInterrupt; ignore and exit cleanly
+        pass
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+except Exception:
+    # Fallback: ensure process can exit
+    try:
+        root.destroy()
+    except Exception:
+        pass
