@@ -1657,6 +1657,7 @@ def _load_employee_name_cache(expected_signature):
         return None
 
     # Try DPAPI-protected binary first (Windows), then fall back to plain JSON
+    payload = None
     if platform.system() == "Windows" and win32crypt is not None:
         try:
             with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
@@ -1673,7 +1674,8 @@ def _load_employee_name_cache(expected_signature):
                 payload = None
         except Exception:
             payload = None
-    else:
+
+    if payload is None:
         try:
             with open(EMPLOYEE_NAME_CACHE_PATH, "r", encoding="utf-8") as cache_file:
                 payload = json.load(cache_file)
@@ -1714,6 +1716,8 @@ def _save_employee_name_cache(signature, suggestions):
     if platform.system() == "Windows" and win32crypt is not None:
         try:
             encrypted = win32crypt.CryptProtectData(serialized, None, None, None, None, 0)
+            if isinstance(encrypted, tuple):
+                encrypted = encrypted[1] if len(encrypted) > 1 else encrypted[0]
             with open(EMPLOYEE_NAME_CACHE_PATH, "wb") as cache_file:
                 cache_file.write(encrypted)
             return
