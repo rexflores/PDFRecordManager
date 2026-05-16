@@ -5,6 +5,7 @@ import csv
 import shutil
 import tempfile
 import subprocess
+import hashlib
 import re
 import importlib
 import platform
@@ -65,10 +66,73 @@ except ImportError:
     WinotifyNotification = None
 
 
-BUTTON_COMMAND_DEBOUNCE_MS = 350
+BUTTON_COMMAND_DEBOUNCE_MS = 600
+
+UI_SCALE_MODE_OPTIONS = [
+    ("Auto (Fit screen)", "auto"),
+    ("Compact (90%)", "0.9"),
+    ("Normal (100%)", "1.0"),
+    ("Large (110%)", "1.1"),
+    ("Extra Large (125%)", "1.25"),
+]
+_UI_SCALE_MODE_VALUES = {value for _, value in UI_SCALE_MODE_OPTIONS}
+_UI_SCALE_MIN = 0.75
+_UI_SCALE_MAX = 1.25
+_ui_scale_factor = 1.0
+
+FONT_SCALE_MODE_OPTIONS = [
+    ("Small (90%)", "0.9"),
+    ("Normal (100%)", "1.0"),
+    ("Large (110%)", "1.1"),
+    ("Extra Large (125%)", "1.25"),
+    ("Huge (140%)", "1.4"),
+]
+_FONT_SCALE_MODE_VALUES = {value for _, value in FONT_SCALE_MODE_OPTIONS}
+_FONT_SCALE_MIN = 0.9
+_FONT_SCALE_MAX = 1.4
+_EFFECTIVE_SCALE_MIN = 0.75
+_EFFECTIVE_SCALE_MAX = 1.8
+_font_scale_factor = 1.0
 
 
-def _wrap_debounced_callback(callback, debounce_ms=BUTTON_COMMAND_DEBOUNCE_MS):
+def _restore_widget_after_debounce(widget, *, is_ttk=False):
+    try:
+        if not widget.winfo_exists():
+            return
+        if is_ttk:
+            widget.state(["!disabled"])
+        else:
+            widget.configure(state="normal")
+    except Exception:
+        pass
+
+
+def _temporarily_disable_widget(widget, debounce_ms):
+    try:
+        delay_ms = int(max(0, debounce_ms))
+        if delay_ms <= 0:
+            return
+        if hasattr(widget, "state"):
+            if "disabled" in widget.state():
+                return
+            widget.state(["disabled"])
+            widget.after(
+                delay_ms,
+                lambda: _restore_widget_after_debounce(widget, is_ttk=True),
+            )
+        else:
+            if str(widget.cget("state")).lower() == "disabled":
+                return
+            widget.configure(state="disabled")
+            widget.after(
+                delay_ms,
+                lambda: _restore_widget_after_debounce(widget, is_ttk=False),
+            )
+    except Exception:
+        pass
+
+
+def _wrap_debounced_callback(callback, *, widget=None, debounce_ms=BUTTON_COMMAND_DEBOUNCE_MS):
     last_invocation = [0.0]
 
     def _debounced_callback(*args, **kwargs):
@@ -76,6 +140,8 @@ def _wrap_debounced_callback(callback, debounce_ms=BUTTON_COMMAND_DEBOUNCE_MS):
         if now - last_invocation[0] < (debounce_ms / 1000.0):
             return None
         last_invocation[0] = now
+        if widget is not None:
+            _temporarily_disable_widget(widget, debounce_ms)
         return callback(*args, **kwargs)
 
     return _debounced_callback
@@ -83,13 +149,29 @@ def _wrap_debounced_callback(callback, debounce_ms=BUTTON_COMMAND_DEBOUNCE_MS):
 
 class _DebouncedButton(ttk.Button):
     def __init__(self, *args, **kwargs):
-        if "command" in kwargs and kwargs["command"] is not None:
-            kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+        command = kwargs.pop("command", None)
         super().__init__(*args, **kwargs)
+        if command is not None:
+            self.configure(command=command)
 
     def configure(self, cnf=None, **kwargs):
         if "command" in kwargs and kwargs["command"] is not None:
-            kwargs["command"] = _wrap_debounced_callback(kwargs["command"])
+            kwargs["command"] = _wrap_debounced_callback(kwargs["command"], widget=self)
+        return super().configure(cnf, **kwargs)
+
+    config = configure
+
+
+class _DebouncedTkButton(tk.Button):
+    def __init__(self, *args, **kwargs):
+        command = kwargs.pop("command", None)
+        super().__init__(*args, **kwargs)
+        if command is not None:
+            self.configure(command=command)
+
+    def configure(self, cnf=None, **kwargs):
+        if "command" in kwargs and kwargs["command"] is not None:
+            kwargs["command"] = _wrap_debounced_callback(kwargs["command"], widget=self)
         return super().configure(cnf, **kwargs)
 
     config = configure
@@ -119,6 +201,7 @@ def _debounced_menu_add_radiobutton(self, *args, **kwargs):
 
 
 ttk.Button = _DebouncedButton
+tk.Button = _DebouncedTkButton
 tk.Menu.add_command = _debounced_menu_add_command
 tk.Menu.add_checkbutton = _debounced_menu_add_checkbutton
 tk.Menu.add_radiobutton = _debounced_menu_add_radiobutton
@@ -173,7 +256,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -257,6 +340,18 @@ def _apply_app_icon(window):
             return False
 
 
+def _scaled_font_size(size):
+    return max(9, int(round(size * _font_scale_factor)) + 1)
+
+
+def _font_regular(size):
+    return ("Segoe UI", _scaled_font_size(size))
+
+
+def _font_semibold(size):
+    return ("Segoe UI Semibold", _scaled_font_size(size))
+
+
 def apply_theme(window):
     window.configure(bg=SHELL_BG_COLOR)
     style = ttk.Style(window)
@@ -291,67 +386,67 @@ def apply_theme(window):
         "Title.TLabel",
         background=SHELL_BG_COLOR,
         foreground=TEXT_COLOR,
-        font=("Segoe UI Semibold", 20),
+        font=_font_semibold(20),
     )
     style.configure(
         "HeaderTitle.TLabel",
         background=SURFACE_ELEVATED_COLOR,
         foreground=TEXT_COLOR,
-        font=("Segoe UI Semibold", 20),
+        font=_font_semibold(20),
     )
     style.configure(
         "Subheading.TLabel",
         background=SHELL_BG_COLOR,
         foreground=SUBTEXT_COLOR,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
     )
     style.configure(
         "HeaderSubheading.TLabel",
         background=SURFACE_ELEVATED_COLOR,
         foreground=SUBTEXT_COLOR,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
     )
     style.configure(
         "HeaderStatus.TLabel",
         background=SURFACE_ELEVATED_COLOR,
         foreground=STATUS_BADGE_TEXT,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
     )
     style.configure(
         "Card.TLabel",
         background=SURFACE_COLOR,
         foreground=TEXT_COLOR,
-        font=("Segoe UI", 11),
+        font=_font_regular(11),
     )
     style.configure(
         "SectionTitle.TLabel",
         background=SURFACE_COLOR,
         foreground=TEXT_COLOR,
-        font=("Segoe UI Semibold", 11),
+        font=_font_semibold(11),
     )
     style.configure(
         "FieldLabel.TLabel",
         background=SURFACE_COLOR,
         foreground=SUBTEXT_COLOR,
-        font=("Segoe UI", 9),
+        font=_font_regular(9),
     )
     style.configure(
         "CardMuted.TLabel",
         background=SURFACE_COLOR,
         foreground=SUBTEXT_COLOR,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
     )
     style.configure(
         "StatusStrong.TLabel",
         background=SURFACE_COLOR,
         foreground="#f3f8ff",
-        font=("Segoe UI Semibold", 11),
+        font=_font_semibold(11),
     )
     style.configure(
         "StatusText.TLabel",
         background=SHELL_BG_COLOR,
         foreground="#deebff",
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
     )
     style.configure(
         "StatusBadge.TFrame",
@@ -362,7 +457,7 @@ def apply_theme(window):
         "StatusBadge.TLabel",
         background=STATUS_BADGE_BG,
         foreground=STATUS_BADGE_TEXT,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
     )
     style.configure(
         "StatusSurface.TFrame",
@@ -373,19 +468,19 @@ def apply_theme(window):
         "StatusSurface.TLabel",
         background=STATUS_SURFACE_BG,
         foreground="#f2f7ff",
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
     )
     style.configure(
         "ActionTitle.TLabel",
         background=ACTION_BAR_BG,
         foreground=SUBTEXT_COLOR,
-        font=("Segoe UI", 9),
+        font=_font_regular(9),
     )
     style.configure(
         "TLabel",
         background=SHELL_BG_COLOR,
         foreground=TEXT_COLOR,
-        font=("Segoe UI", 11),
+        font=_font_regular(11),
     )
     style.configure(
         "PendingRow.TFrame",
@@ -411,31 +506,31 @@ def apply_theme(window):
         "PendingFile.TLabel",
         background=PENDING_ROW_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
     )
     style.configure(
         "PendingFileHover.TLabel",
         background=PENDING_ROW_HOVER_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
     )
     style.configure(
         "PendingFileSelected.TLabel",
         background=PENDING_ROW_SELECTED_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
     )
     style.configure(
         "PendingFileSelectedHover.TLabel",
         background=PENDING_ROW_SELECTED_HOVER_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
     )
     style.configure(
         "PendingFile.TCheckbutton",
         background=PENDING_ROW_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
         padding=(2, 0),
     )
     style.map(
@@ -447,7 +542,7 @@ def apply_theme(window):
         "PendingFileHover.TCheckbutton",
         background=PENDING_ROW_HOVER_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI", 10),
+        font=_font_regular(10),
         padding=(2, 0),
     )
     style.map(
@@ -459,7 +554,7 @@ def apply_theme(window):
         "PendingFileSelected.TCheckbutton",
         background=PENDING_ROW_SELECTED_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
         padding=(2, 0),
     )
     style.map(
@@ -471,7 +566,7 @@ def apply_theme(window):
         "PendingFileSelectedHover.TCheckbutton",
         background=PENDING_ROW_SELECTED_HOVER_BG,
         foreground=PENDING_ROW_TEXT,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
         padding=(2, 0),
     )
     style.map(
@@ -483,7 +578,7 @@ def apply_theme(window):
         "TButton",
         background=ACCENT_COLOR,
         foreground="white",
-        font=("Segoe UI Semibold", 11),
+        font=_font_semibold(11),
         padding=8,
         borderwidth=0,
     )
@@ -500,7 +595,7 @@ def apply_theme(window):
         "PrimaryAction.TButton",
         background=ACCENT_COLOR,
         foreground="white",
-        font=("Segoe UI Semibold", 11),
+        font=_font_semibold(11),
         padding=(14, 8),
         borderwidth=0,
     )
@@ -512,7 +607,7 @@ def apply_theme(window):
         "SecondaryAction.TButton",
         background=MUTED_BUTTON_BG,
         foreground=TEXT_COLOR,
-        font=("Segoe UI Semibold", 11),
+        font=_font_semibold(11),
         padding=(14, 8),
         borderwidth=0,
     )
@@ -525,7 +620,7 @@ def apply_theme(window):
         "Subtle.TButton",
         background=MUTED_BUTTON_BG,
         foreground=TEXT_COLOR,
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
         padding=(10, 7),
         borderwidth=0,
     )
@@ -538,7 +633,7 @@ def apply_theme(window):
         "ToolbarIcon.TButton",
         background=ACCENT_COLOR,
         foreground="white",
-        font=("Segoe UI Semibold", 10),
+        font=_font_semibold(10),
         padding=(9, 6),
         borderwidth=0,
     )
@@ -968,6 +1063,63 @@ def _get_display_work_area(window):
     return work_x, work_y, max(work_w, 320), max(work_h, 320)
 
 
+def _clamp_ui_scale(value):
+    return max(_UI_SCALE_MIN, min(_UI_SCALE_MAX, value))
+
+
+def _clamp_font_scale(value):
+    return max(_FONT_SCALE_MIN, min(_FONT_SCALE_MAX, value))
+
+
+def _clamp_effective_scale(value):
+    return max(_EFFECTIVE_SCALE_MIN, min(_EFFECTIVE_SCALE_MAX, value))
+
+
+def _compute_auto_ui_scale(window):
+    work_x, work_y, work_w, work_h = _get_display_work_area(window)
+    target_w = BASE_WINDOW_WIDTH + DEFAULT_MARGIN_X
+    target_h = BASE_WINDOW_HEIGHT + DEFAULT_MARGIN_Y
+    scale_w = work_w / max(1, target_w)
+    scale_h = work_h / max(1, target_h)
+    return max(1.0, _clamp_ui_scale(min(scale_w, scale_h)))
+
+
+def _resolve_ui_scale_mode(mode):
+    if mode == "auto":
+        return _compute_auto_ui_scale(root)
+    try:
+        return _clamp_ui_scale(float(mode))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _resolve_font_scale_mode(mode):
+    try:
+        return _clamp_font_scale(float(mode))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _apply_combined_scaling():
+    effective_scale = _clamp_effective_scale(_ui_scale_factor * _font_scale_factor)
+    try:
+        root.tk.call("tk", "scaling", effective_scale)
+    except tk.TclError:
+        pass
+
+
+def _apply_ui_scale(mode):
+    global _ui_scale_factor
+    _ui_scale_factor = _resolve_ui_scale_mode(mode)
+    _apply_combined_scaling()
+
+
+def _apply_font_scale(mode):
+    global _font_scale_factor
+    _font_scale_factor = _resolve_font_scale_mode(mode)
+    _apply_combined_scaling()
+
+
 def configure_window_geometry(
     window,
     base_width,
@@ -981,14 +1133,23 @@ def configure_window_geometry(
 
     work_x, work_y, work_w, work_h = _get_display_work_area(window)
 
+    scaled_base_width = int(base_width * _ui_scale_factor)
+    scaled_base_height = int(base_height * _ui_scale_factor)
+    scaled_min_width = (
+        int(min_width * _ui_scale_factor) if min_width is not None else scaled_base_width
+    )
+    scaled_min_height = (
+        int(min_height * _ui_scale_factor) if min_height is not None else scaled_base_height
+    )
+
     usable_w = max(work_w - margin_x, int(work_w * 0.9))
     usable_h = max(work_h - margin_y, int(work_h * 0.9))
 
-    width = min(base_width, usable_w)
-    height = min(base_height, usable_h)
+    width = min(scaled_base_width, usable_w)
+    height = min(scaled_base_height, usable_h)
 
-    min_width = base_width if min_width is None else min_width
-    min_height = base_height if min_height is None else min_height
+    min_width = scaled_base_width if min_width is None else scaled_min_width
+    min_height = scaled_base_height if min_height is None else scaled_min_height
 
     if usable_w >= min_width:
         width = max(width, min_width)
@@ -1066,6 +1227,8 @@ def _center_window_to_current_size(window):
 
     window.geometry(f"{width}x{height}+{x_pos}+{y_pos}")
 
+
+_apply_ui_scale("auto")
 
 configure_window_geometry(
     root,
@@ -1397,10 +1560,19 @@ def _invoke_focused_widget_if_activatable(widget):
 
 
 def _handle_global_enter_activation(event):
+    if time.monotonic() < getattr(root, "_suppress_enter_activation_until", 0.0):
+        return "break"
     focused_widget = root.focus_get()
     if focused_widget is None:
         focused_widget = getattr(event, "widget", None)
     return _invoke_focused_widget_if_activatable(focused_widget)
+
+
+def _suppress_global_enter_activation(duration_seconds=0.6):
+    try:
+        root._suppress_enter_activation_until = time.monotonic() + float(duration_seconds)
+    except Exception:
+        pass
 
 
 def _ensure_global_enter_activation_binding():
@@ -1412,7 +1584,7 @@ def _ensure_global_enter_activation_binding():
 
 
 def _apply_modern_listbox_style(listbox, *, compact=False, export_selection=None):
-    font_size = 10 if compact else 10
+    font_size = _scaled_font_size(10 if compact else 10)
     config = {
         "bg": LISTBOX_BG,
         "fg": LISTBOX_TEXT,
@@ -1530,7 +1702,7 @@ class HoverTooltip:
             pady=4,
             justify="left",
             anchor="w",
-            font=("Segoe UI", 9),
+            font=_font_regular(9),
         )
         label.pack()
 
@@ -1556,6 +1728,8 @@ auto_refresh_var = tk.BooleanVar(value=True)
 tray_notifications_enabled_var = tk.BooleanVar(value=True)
 keep_backup_preference_var = tk.BooleanVar(value=False)
 show_text_with_icons_var = tk.BooleanVar(value=False)
+ui_scale_mode_var = tk.StringVar(value="auto")
+font_scale_mode_var = tk.StringVar(value="1.0")
 confirm_save_folder_exists_var = tk.BooleanVar(value=True)
 confirm_save_action_var = tk.BooleanVar(value=True)
 confirm_merge_main_var = tk.BooleanVar(value=True)
@@ -1656,6 +1830,26 @@ preferences_menu.add_checkbutton(
     variable=show_text_with_icons_var,
     command=lambda: _on_show_text_with_icons_preference_changed(),
 )
+
+display_scale_menu = tk.Menu(preferences_menu, tearoff=0)
+for label, value in UI_SCALE_MODE_OPTIONS:
+    display_scale_menu.add_radiobutton(
+        label=label,
+        variable=ui_scale_mode_var,
+        value=value,
+        command=lambda: _on_ui_scale_preference_changed(),
+    )
+preferences_menu.add_cascade(label="Display Scale", menu=display_scale_menu)
+
+font_scale_menu = tk.Menu(preferences_menu, tearoff=0)
+for label, value in FONT_SCALE_MODE_OPTIONS:
+    font_scale_menu.add_radiobutton(
+        label=label,
+        variable=font_scale_mode_var,
+        value=value,
+        command=lambda: _on_font_scale_preference_changed(),
+    )
+preferences_menu.add_cascade(label="Font Size", menu=font_scale_menu)
 
 name_filter_menu = tk.Menu(preferences_menu, tearoff=0)
 name_filter_menu.add_radiobutton(
@@ -1850,26 +2044,52 @@ def _remove_employee_name_cache_files(remove_key=False, remove_primary=True, rem
                 pass
 
 
+def _build_file_content_digest(path):
+    hasher = hashlib.sha256()
+    try:
+        with open(path, "rb") as source_file:
+            while True:
+                chunk = source_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+    except OSError:
+        return None
+    return hasher.hexdigest()
+
+
+def _prepare_path_for_overwrite(path):
+    if not path or not os.path.exists(path):
+        return
+    try:
+        if os.name == "nt":
+            FILE_ATTRIBUTE_NORMAL = 0x80
+            ctypes.windll.kernel32.SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL)
+    except Exception:
+        pass
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
 def _build_employee_name_cache_signature(source_paths, filter_mode_value):
     signature_sources = []
     for raw_path in source_paths:
         path = normalize_path(raw_path)
         if not path or not os.path.exists(path):
             return None
-        try:
-            stats = os.stat(path)
-        except OSError:
+        content_digest = _build_file_content_digest(path)
+        if not content_digest:
             return None
 
-        signature_sources.append({
-            "path": os.path.normcase(os.path.abspath(path)),
-            "size": stats.st_size,
-            "mtime_ns": getattr(stats, "st_mtime_ns", int(stats.st_mtime * 1_000_000_000)),
-        })
+        signature_sources.append(
+            f"{os.path.basename(path).lower()}\u0000{content_digest}"
+        )
 
     payload = {
         "filter_mode": filter_mode_value,
-        "sources": signature_sources,
+        "sources": sorted(signature_sources),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -1949,7 +2169,7 @@ def _load_employee_name_cache(expected_signature):
         with open(EMPLOYEE_NAME_CACHE_PATH, "rb") as cache_file:
             raw_cache = cache_file.read()
     except OSError:
-        return None
+        return _load_legacy_employee_name_cache(expected_signature)
 
     if not raw_cache.startswith(EMPLOYEE_NAME_CACHE_MAGIC):
         legacy_payload = _load_legacy_employee_name_cache(expected_signature)
@@ -1963,11 +2183,11 @@ def _load_employee_name_cache(expected_signature):
 
     minimum_header_size = len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 + 12
     if len(raw_cache) <= minimum_header_size:
-        return None
+        return _load_legacy_employee_name_cache(expected_signature)
 
     version = raw_cache[len(EMPLOYEE_NAME_CACHE_MAGIC)]
     if version != EMPLOYEE_NAME_CACHE_VERSION:
-        return None
+        return _load_legacy_employee_name_cache(expected_signature)
 
     nonce = raw_cache[len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 : len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 + 12]
     ciphertext = raw_cache[len(EMPLOYEE_NAME_CACHE_MAGIC) + 1 + 12 :]
@@ -1977,16 +2197,19 @@ def _load_employee_name_cache(expected_signature):
         plaintext = AESGCM(key_bytes).decrypt(nonce, ciphertext, EMPLOYEE_NAME_CACHE_AAD)
         payload = json.loads(plaintext.decode("utf-8"))
     except Exception:
-        return None
+        return _load_legacy_employee_name_cache(expected_signature)
 
     if not isinstance(payload, dict):
-        return None
+        return _load_legacy_employee_name_cache(expected_signature)
     if payload.get("signature") != expected_signature:
+        legacy_payload = _load_legacy_employee_name_cache(expected_signature)
+        if legacy_payload is not None:
+            return legacy_payload
         return None
 
     cached_names = payload.get("suggestions", [])
     if not isinstance(cached_names, list):
-        return None
+        return _load_legacy_employee_name_cache(expected_signature)
 
     cleaned = []
     seen = set()
@@ -2061,8 +2284,12 @@ def _save_employee_name_cache(signature, suggestions):
     tmp_path = EMPLOYEE_NAME_CACHE_PATH + ".tmp"
     try:
         if AESGCM is None:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, sort_keys=True)
+            os.replace(tmp_path, LEGACY_EMPLOYEE_NAME_CACHE_PATH)
             return
 
+        encrypted_saved = False
         key_bytes = _load_or_create_employee_name_cache_key()
         nonce = os.urandom(12)
         plaintext = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -2073,10 +2300,39 @@ def _save_employee_name_cache(signature, suggestions):
             f.write(bytes([EMPLOYEE_NAME_CACHE_VERSION]))
             f.write(nonce)
             f.write(ciphertext)
-        os.replace(tmp_path, EMPLOYEE_NAME_CACHE_PATH)
+        _prepare_path_for_overwrite(EMPLOYEE_NAME_CACHE_PATH)
+        try:
+            os.replace(tmp_path, EMPLOYEE_NAME_CACHE_PATH)
+        except OSError:
+            try:
+                _prepare_path_for_overwrite(EMPLOYEE_NAME_CACHE_PATH)
+                if os.path.exists(EMPLOYEE_NAME_CACHE_PATH):
+                    os.remove(EMPLOYEE_NAME_CACHE_PATH)
+                os.replace(tmp_path, EMPLOYEE_NAME_CACHE_PATH)
+            except OSError:
+                encrypted_saved = False
+            else:
+                encrypted_saved = True
+        else:
+            encrypted_saved = True
+
+        legacy_tmp_path = LEGACY_EMPLOYEE_NAME_CACHE_PATH + ".tmp"
+        with open(legacy_tmp_path, "w", encoding="utf-8") as legacy_file:
+            json.dump(payload, legacy_file, ensure_ascii=False, sort_keys=True)
+        _prepare_path_for_overwrite(LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+        try:
+            os.replace(legacy_tmp_path, LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+        except OSError:
+            try:
+                _prepare_path_for_overwrite(LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+                if os.path.exists(LEGACY_EMPLOYEE_NAME_CACHE_PATH):
+                    os.remove(LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+                os.replace(legacy_tmp_path, LEGACY_EMPLOYEE_NAME_CACHE_PATH)
+            except OSError:
+                pass
 
         # On Windows, mark hidden + readonly and restrict ACL to current user
-        if os.name == "nt":
+        if encrypted_saved and os.name == "nt":
             try:
                 username = getpass.getuser()
                 # Remove inherited permissions and grant current user full control
@@ -2704,13 +2960,57 @@ def _refresh_employee_sources_selection_count(_event=None):
     )
 
 
-def _set_employee_sources(paths, persist=False, progress_callback=None, invalidate_cache=False):
-    global employee_source_paths
+def _normalize_employee_source_paths(paths, *, drop_missing=True, merge_by_basename=False):
     normalized = []
+    missing = []
     for raw_path in paths:
         path = normalize_path(raw_path)
-        if path and path not in normalized:
-            normalized.append(path)
+        if not path or path in normalized:
+            continue
+        if drop_missing and not os.path.exists(path):
+            missing.append(path)
+            continue
+        normalized.append(path)
+
+    if merge_by_basename:
+        merged = []
+        for path in normalized:
+            base_name = os.path.basename(path).lower()
+            replaced = False
+            for index, existing_path in enumerate(merged):
+                if os.path.basename(existing_path).lower() == base_name:
+                    merged[index] = path
+                    replaced = True
+                    break
+            if not replaced:
+                merged.append(path)
+        normalized = merged
+    return normalized, missing
+
+
+def _merge_employee_sources_replace_by_basename(existing_paths, new_paths):
+    merged = list(existing_paths)
+    for new_path in new_paths:
+        new_base = os.path.basename(new_path).lower()
+        replaced = False
+        for idx, existing_path in enumerate(merged):
+            if os.path.basename(existing_path).lower() == new_base:
+                merged[idx] = new_path
+                replaced = True
+                break
+        if not replaced:
+            merged.append(new_path)
+    return merged
+
+
+def _set_employee_sources(paths, persist=False, progress_callback=None, invalidate_cache=False, drop_missing=True):
+    global employee_source_paths
+    normalized, missing = _normalize_employee_source_paths(
+        paths,
+        drop_missing=drop_missing,
+        merge_by_basename=True,
+    )
+    sources_changed = normalized != list(paths)
     employee_source_paths = normalized
     _refresh_employee_sources_listbox()
     if invalidate_cache:
@@ -2724,7 +3024,7 @@ def _set_employee_sources(paths, persist=False, progress_callback=None, invalida
     # Reload suggestions now so the in-memory list and saved cache (if any)
     # reflect the new source configuration.
     load_employee_name_suggestions(progress_callback=progress_callback)
-    if persist:
+    if persist or missing or sources_changed:
         save_settings()
 
 
@@ -3469,6 +3769,8 @@ def load_settings(progress_callback=None):
         "tray_notifications_enabled",
         tray_notifications_enabled_var.get(),
     )
+    ui_scale_mode_value = data.get("ui_scale_mode", ui_scale_mode_var.get())
+    font_scale_mode_value = data.get("font_scale_mode", font_scale_mode_var.get())
     show_text_with_icons_value = data.get(
         "show_text_with_icons",
         data.get("pending_toolbar_text_labels", show_text_with_icons_var.get()),
@@ -3508,6 +3810,21 @@ def load_settings(progress_callback=None):
     auto_refresh_var.set(bool(auto_refresh_value))
     tray_notifications_enabled_var.set(bool(tray_notifications_value))
     show_text_with_icons_var.set(bool(show_text_with_icons_value))
+
+    if ui_scale_mode_value in _UI_SCALE_MODE_VALUES:
+        ui_scale_mode_var.set(ui_scale_mode_value)
+    if font_scale_mode_value in _FONT_SCALE_MODE_VALUES:
+        font_scale_mode_var.set(font_scale_mode_value)
+    _apply_font_scale(font_scale_mode_var.get())
+    _apply_ui_scale(ui_scale_mode_var.get())
+    configure_window_geometry(
+        root,
+        BASE_WINDOW_WIDTH,
+        BASE_WINDOW_HEIGHT,
+        min_width=MIN_WINDOW_WIDTH,
+        min_height=MIN_WINDOW_HEIGHT,
+    )
+    apply_theme(root)
 
     try:
         parsed_rotation_width = int(rotation_preview_width_value)
@@ -3551,6 +3868,8 @@ def save_settings():
         "confirm_merge_recycle": confirm_merge_recycle_var.get(),
         "auto_refresh_pending_files": auto_refresh_var.get(),
         "tray_notifications_enabled": tray_notifications_enabled_var.get(),
+        "ui_scale_mode": ui_scale_mode_var.get(),
+        "font_scale_mode": font_scale_mode_var.get(),
         "show_text_with_icons": show_text_with_icons_var.get(),
         "rotation_preview_window_width": rotation_preview_window_width,
         "rotation_preview_window_height": rotation_preview_window_height,
@@ -4130,12 +4449,21 @@ def _get_year_input_guidance(latest_text, earliest_text):
     return f"Year range will be normalized to {latest_year} - {earliest_year}."
 
 
-def _build_record_filename(name, latest_year, earliest_year):
+def _normalize_department_suffix(department_value):
+    department = str(department_value or "").strip()
+    if not department or department.lower() == "medical":
+        return ""
+    return department
+
+
+def _build_record_filename(name, latest_year, earliest_year, department_value="Medical"):
     latest_int = int(latest_year)
     earliest_int = int(earliest_year)
+    department_suffix = _normalize_department_suffix(department_value)
+    suffix = f"_{department_suffix}" if department_suffix else ""
     if latest_int == earliest_int:
-        return f"{name}_{latest_int}.pdf"
-    return f"{name}_{latest_int}_{earliest_int}.pdf"
+        return f"{name}_{latest_int}{suffix}.pdf"
+    return f"{name}_{latest_int}_{earliest_int}{suffix}.pdf"
 
 
 def _validate_filesystem_component_name(raw_value, value_label):
@@ -4475,9 +4803,10 @@ def select_employee_sources():
     )
     if not files:
         return
-    new_paths = employee_source_paths + [normalize_path(path) for path in files]
+    new_paths = [normalize_path(path) for path in files]
+    merged_paths = _merge_employee_sources_replace_by_basename(employee_source_paths, new_paths)
     _apply_employee_sources_with_progress(
-        new_paths,
+        merged_paths,
         persist=True,
         invalidate_cache=True,
         title="Loading Employee Sources",
@@ -4647,7 +4976,6 @@ pending_selection_anchor_filename = None
 pending_snapshot = set()
 auto_refresh_job_id = None
 ui_icon_images = {}
-pending_row_preview_buttons = []
 name_buttons_container = None
 add_sources_button = None
 remove_sources_button = None
@@ -4744,6 +5072,26 @@ def _on_keep_backup_preference_changed():
 
 
 def _on_confirm_preferences_changed():
+    save_settings()
+
+
+def _on_ui_scale_preference_changed():
+    _apply_ui_scale(ui_scale_mode_var.get())
+    configure_window_geometry(
+        root,
+        BASE_WINDOW_WIDTH,
+        BASE_WINDOW_HEIGHT,
+        min_width=MIN_WINDOW_WIDTH,
+        min_height=MIN_WINDOW_HEIGHT,
+    )
+    _center_window_to_current_size(root)
+    save_settings()
+
+
+def _on_font_scale_preference_changed():
+    _apply_font_scale(font_scale_mode_var.get())
+    apply_theme(root)
+    _center_window_to_current_size(root)
     save_settings()
 
 
@@ -4861,10 +5209,7 @@ def _update_icon_button_labels():
             continue
         _configure_icon_button(button, icon_name, fallback_icon, label)
 
-    for button in list(pending_row_preview_buttons):
-        if button is None or not button.winfo_exists():
-            continue
-        _configure_icon_button(button, "preview", TOOLBAR_ICON_PREVIEW, "Preview")
+    # per-row preview buttons removed; toolbar preview handles selected files
 
     _refresh_name_toolbar_layout()
     _refresh_pending_toolbar_layout()
@@ -5192,10 +5537,9 @@ def _set_pending_files_count(count):
 
 
 def load_pending_files():
-    global pending_file_vars, pending_row_preview_buttons
+    global pending_file_vars
     global pending_file_order, pending_selection_anchor_filename
     if pending_items_frame is None:
-        pending_row_preview_buttons = []
         pending_file_order = []
         pending_selection_anchor_filename = None
         _set_pending_files_count(0)
@@ -5203,7 +5547,7 @@ def load_pending_files():
         _set_pending_snapshot()
         return
 
-    pending_row_preview_buttons = []
+    
 
     for child in pending_items_frame.winfo_children():
         child.destroy()
@@ -5320,17 +5664,7 @@ def load_pending_files():
 
         _apply_row_visual()
 
-        preview_button = ttk.Button(
-            row,
-            style="ToolbarIcon.TButton",
-            command=lambda f=filename: preview_specific_pending_pdf(f),
-        )
-        preview_button.pack(side="right", padx=(8, 0))
-        preview_button.bind("<Enter>", _on_row_enter, add="+")
-        preview_button.bind("<Leave>", _on_row_leave, add="+")
-        _attach_hover_tooltip(preview_button, "Preview this pending PDF")
-        _configure_icon_button(preview_button, "preview", TOOLBAR_ICON_PREVIEW, "Preview")
-        pending_row_preview_buttons.append(preview_button)
+        # Per-row preview button removed (redundant with toolbar preview for selected files)
 
     if pending_selection_anchor_filename is None:
         for file_name in pending_file_order:
@@ -6159,7 +6493,7 @@ def rotate_selected_pending_pdfs(
                 text=f"{file_name} ({page_count} page{'s' if page_count != 1 else ''})",
                 bg=row_bg_normal,
                 fg=TEXT_COLOR,
-                font=("Segoe UI Semibold", 10),
+                font=("Segoe UI Semibold", 11),
                 justify="left",
                 wraplength=980,
                 anchor="w",
@@ -6247,7 +6581,7 @@ def rotate_selected_pending_pdfs(
                         text=f"Page {page_index + 1}",
                         bg=page_bg_normal,
                         fg=TEXT_COLOR,
-                        font=("Segoe UI", 9),
+                        font=("Segoe UI", 10),
                         anchor="w",
                     )
                     page_title.pack(anchor="w")
@@ -6295,7 +6629,7 @@ def rotate_selected_pending_pdfs(
                         text=f"Page {page_index + 1} / {page_count}",
                         bg=page_bg_normal,
                         fg=TEXT_COLOR,
-                        font=("Segoe UI", 9),
+                        font=("Segoe UI", 10),
                         anchor="w",
                     )
                     page_label.pack(anchor="w")
@@ -6540,6 +6874,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     name_var = tk.StringVar()
     letter_var = tk.StringVar()
     status_var = tk.StringVar(value="Active")
+    department_var = tk.StringVar(value="Medical")
     new_year_var = tk.StringVar()
     old_year_var = tk.StringVar()
     year_hint_var = tk.StringVar(value=_get_year_input_guidance("", ""))
@@ -6553,6 +6888,9 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         name = name_var.get().strip()
         current_letter = letter_var.get().strip().upper()
         status_value = status_var.get()
+        department_value = department_var.get().strip()
+        latest = new_year_var.get().strip()
+        earliest = old_year_var.get().strip()
 
         if not root_path:
             dest_path_var.set("Select Records Root Folder to calculate destination path.")
@@ -6562,7 +6900,13 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             return
 
         letter_segment = current_letter or (name[0].upper() if name else "#")
-        preview_path = os.path.join(root_path, status_value, letter_segment, name)
+        years = _normalize_record_year_inputs(latest, earliest)
+        if years is not None:
+            latest_year, earliest_year = years
+            preview_filename = _build_record_filename(name, latest_year, earliest_year, department_value)
+            preview_path = os.path.join(root_path, status_value, letter_segment, name, preview_filename)
+        else:
+            preview_path = os.path.join(root_path, status_value, letter_segment, name)
         dest_path_var.set(normalize_path(preview_path))
 
     def update_letter(*args):
@@ -6577,8 +6921,11 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     name_var.trace_add("write", update_letter)
     letter_var.trace_add("write", refresh_destination_path)
     status_var.trace_add("write", refresh_destination_path)
+    department_var.trace_add("write", refresh_destination_path)
     new_year_var.trace_add("write", refresh_year_hint)
+    new_year_var.trace_add("write", refresh_destination_path)
     old_year_var.trace_add("write", refresh_year_hint)
+    old_year_var.trace_add("write", refresh_destination_path)
     root_trace_id = root_folder.trace_add("write", refresh_destination_path)
 
     parsed_pending_metadata = parse_filename_metadata(filename)
@@ -6631,13 +6978,14 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     metadata_card.pack(fill="x", pady=(0, 10))
     metadata_card.columnconfigure(0, weight=1)
     metadata_card.columnconfigure(1, weight=1)
+    metadata_card.columnconfigure(2, weight=1)
 
     ttk.Label(metadata_card, text="Record Metadata", style="SectionTitle.TLabel").grid(
-        row=0, column=0, columnspan=2, sticky="w"
+        row=0, column=0, columnspan=3, sticky="w"
     )
 
     ttk.Label(metadata_card, text="Employee Name", style="FieldLabel.TLabel").grid(
-        row=1, column=0, columnspan=2, sticky="w", pady=(10, 2)
+        row=1, column=0, columnspan=3, sticky="w", pady=(10, 2)
     )
     name_field = ttk.Combobox(
         metadata_card,
@@ -6657,7 +7005,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         name_field["values"] = get_filtered_name_suggestions(name_var.get())
 
     name_field.configure(postcommand=_refresh_name_choices)
-    name_field.grid(row=2, column=0, columnspan=2, sticky="ew")
+    name_field.grid(row=2, column=0, columnspan=3, sticky="ew")
 
     ttk.Label(metadata_card, text="Surname Initial", style="FieldLabel.TLabel").grid(
         row=3, column=0, sticky="w", pady=(10, 2)
@@ -6676,7 +7024,19 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         state="readonly",
     )
     _prevent_combobox_mousewheel_value_change(status_field)
-    status_field.grid(row=4, column=1, sticky="ew")
+    status_field.grid(row=4, column=1, sticky="ew", padx=(0, 8))
+
+    ttk.Label(metadata_card, text="Department", style="FieldLabel.TLabel").grid(
+        row=3, column=2, sticky="w", pady=(10, 2)
+    )
+    department_field = ttk.Combobox(
+        metadata_card,
+        textvariable=department_var,
+        values=("PT", "Dental", "Medical"),
+        state="readonly",
+    )
+    _prevent_combobox_mousewheel_value_change(department_field)
+    department_field.grid(row=4, column=2, sticky="ew", padx=(8, 0))
 
     years_card = ttk.Frame(content, style="Card.TFrame", padding=14)
     years_card.pack(fill="x", pady=(0, 10))
@@ -6752,6 +7112,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         letter_value = letter_var.get().strip().upper() or (name[0].upper() if name else "")
         letter = letter_value if letter_value else "#"
         status = status_var.get()
+        department = department_var.get().strip()
         new_year_str = new_year_var.get().strip()
         old_year_str = old_year_var.get().strip()
 
@@ -6786,7 +7147,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             os.makedirs(target_folder, exist_ok=True)
 
         # New filename
-        new_filename = _build_record_filename(name, latest_year, earliest_year)
+        new_filename = _build_record_filename(name, latest_year, earliest_year, department)
         new_path = normalize_path(os.path.join(target_folder, new_filename))
 
         # Check duplicate
@@ -6832,6 +7193,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
 
         processed_successfully = True
         messagebox.showinfo("Success", "File saved successfully.", parent=win)
+        _suppress_global_enter_activation()
 
         close_window()
         load_pending_files()
@@ -6857,7 +7219,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             command=cancel_batch_processing_from_new_record,
             style="Subtle.TButton",
             width=14,
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(8, 12))
 
     ttk.Button(
         action_buttons,
@@ -6865,7 +7227,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
         command=save_record,
         style="PrimaryAction.TButton",
         width=18,
-    ).pack(side="right")
+    ).pack(side="right", padx=(12, 0))
     win.bind("<Escape>", lambda _event: (close_window(), "break")[1])
     win.after_idle(lambda: name_field.focus_set())
     win.protocol("WM_DELETE_WINDOW", close_window)
@@ -6997,6 +7359,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     name_var = tk.StringVar()
     letter_var = tk.StringVar()
     status_var = tk.StringVar(value="Active")
+    department_var = tk.StringVar(value="Medical")
     new_year_var = tk.StringVar()
     old_year_var = tk.StringVar()
     year_hint_var = tk.StringVar(value=_get_year_input_guidance("", ""))
@@ -7055,6 +7418,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         folder = normalize_path(folder_var.get().strip())
         name = name_var.get().strip()
         letter = letter_var.get().strip().upper() or (name[0].upper() if name else "")
+        department = department_var.get().strip()
         latest = new_year_var.get().strip()
         earliest = old_year_var.get().strip()
         year_hint_var.set(_get_year_input_guidance(latest, earliest))
@@ -7080,7 +7444,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             return
 
         latest_val, earliest_val = years
-        filename = _build_record_filename(name, latest_val, earliest_val)
+        filename = _build_record_filename(name, latest_val, earliest_val, department)
         dest_preview_var.set(normalize_path(os.path.join(folder, filename)))
 
         update_merge_summary()
@@ -7093,6 +7457,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
 
     name_var.trace_add("write", update_letter_from_name)
     letter_var.trace_add("write", refresh_destination_preview)
+    department_var.trace_add("write", refresh_destination_preview)
     new_year_var.trace_add("write", refresh_destination_preview)
     old_year_var.trace_add("write", refresh_destination_preview)
     folder_var.trace_add("write", refresh_destination_preview)
@@ -7234,11 +7599,13 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             searchable = _normalize_folder_search_value(
                 f"{employee_name} {relative_path} {candidate_path}"
             )
+            searchable_tokens = _tokenize_folder_search_value(searchable)
             entries.append(
                 {
                     "label": unique_label,
                     "path": candidate_path,
                     "searchable": searchable,
+                    "tokens": searchable_tokens,
                 }
             )
             label_to_path[unique_label] = candidate_path
@@ -7251,26 +7618,40 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             (value or "").lower().replace("\\", " ").replace("/", " ").split()
         )
 
+    def _tokenize_folder_search_value(value):
+        normalized_value = _normalize_folder_search_value(value)
+        if not normalized_value:
+            return []
+        return [token for token in re.split(r"[^a-z0-9]+", normalized_value) if token]
+
     def _get_filtered_folder_suggestions(query):
         if not folder_suggestion_entries:
             return []
 
         normalized_query = _normalize_folder_search_value(query)
-        if not normalized_query:
+        query_tokens = _tokenize_folder_search_value(query)
+        if not query_tokens:
             return [entry["label"] for entry in folder_suggestion_entries]
 
-        prefix_matches = []
-        contains_matches = []
+        exact_matches = []
+        ordered_matches = []
+        unordered_matches = []
 
         for entry in folder_suggestion_entries:
+            candidate_tokens = entry.get("tokens") or []
+            if not _name_search_matches(query_tokens, candidate_tokens):
+                continue
+
             searchable = entry["searchable"]
             label = entry["label"]
-            if searchable.startswith(normalized_query):
-                prefix_matches.append(label)
-            elif normalized_query in searchable:
-                contains_matches.append(label)
+            if searchable == normalized_query:
+                exact_matches.append(label)
+            elif searchable.startswith(normalized_query):
+                ordered_matches.append(label)
+            else:
+                unordered_matches.append(label)
 
-        return prefix_matches + contains_matches
+        return exact_matches + ordered_matches + unordered_matches
 
     def _update_folder_combobox_suggestions(combobox, query_text, event=None):
         suggestions = _get_filtered_folder_suggestions(query_text)
@@ -7670,6 +8051,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
 
         letter_value = letter_var.get().strip().upper() or (employee_name[0].upper() if employee_name else "")
         status_value = status_var.get()
+        department_value = department_var.get().strip()
 
         try:
             validated_employee_name = _validate_windows_path_component(employee_name, "Employee name")
@@ -7687,7 +8069,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         if years is None:
             return
         latest_year, earliest_year = years
-        final_filename = _build_record_filename(employee_name, latest_year, earliest_year)
+        final_filename = _build_record_filename(employee_name, latest_year, earliest_year, department_value)
         final_path = normalize_path(os.path.join(target_folder, final_filename))
 
         existing_path = normalize_path(os.path.join(source_folder, existing_filename))
@@ -7896,6 +8278,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
 
             processed_successfully = True
             messagebox.showinfo("Success", f"Merged file saved to:\n{final_path}", parent=win)
+            _suppress_global_enter_activation()
             load_pending_files()
             close_merge_window()
         except Exception as exc:
@@ -8097,13 +8480,14 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     form_frame.pack(fill="x")
     form_frame.columnconfigure(0, weight=1)
     form_frame.columnconfigure(1, weight=1)
+    form_frame.columnconfigure(2, weight=1)
 
     ttk.Label(form_frame, text="Final Record Details", style="SectionTitle.TLabel").grid(
-        row=0, column=0, columnspan=2, sticky="w"
+        row=0, column=0, columnspan=3, sticky="w"
     )
 
     ttk.Label(form_frame, text="Employee Name", style="FieldLabel.TLabel").grid(
-        row=1, column=0, columnspan=2, sticky="w", pady=(10, 2)
+        row=1, column=0, columnspan=3, sticky="w", pady=(10, 2)
     )
     merge_name_field = ttk.Combobox(
         form_frame,
@@ -8123,7 +8507,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         merge_name_field["values"] = get_filtered_name_suggestions(name_var.get())
 
     merge_name_field.configure(postcommand=_refresh_merge_name_choices)
-    merge_name_field.grid(row=2, column=0, columnspan=2, sticky="ew")
+    merge_name_field.grid(row=2, column=0, columnspan=3, sticky="ew")
 
     ttk.Label(form_frame, text="Surname Initial", style="FieldLabel.TLabel").grid(
         row=3, column=0, sticky="w", pady=(10, 2)
@@ -8140,27 +8524,44 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         state="readonly",
     )
     _prevent_combobox_mousewheel_value_change(status_field)
-    status_field.grid(row=4, column=1, sticky="ew")
+    status_field.grid(row=4, column=1, sticky="ew", padx=(0, 8))
 
-    ttk.Label(form_frame, text="Latest Year", style="FieldLabel.TLabel").grid(
-        row=5, column=0, sticky="w", pady=(10, 2)
+    ttk.Label(form_frame, text="Department", style="FieldLabel.TLabel").grid(
+        row=3, column=2, sticky="w", pady=(10, 2)
     )
-    ttk.Entry(form_frame, textvariable=new_year_var).grid(row=6, column=0, sticky="ew", padx=(0, 8))
-
-    ttk.Label(form_frame, text="Oldest Year", style="FieldLabel.TLabel").grid(
-        row=5, column=1, sticky="w", pady=(10, 2)
-    )
-    ttk.Entry(form_frame, textvariable=old_year_var).grid(row=6, column=1, sticky="ew")
-    ttk.Label(
+    department_field = ttk.Combobox(
         form_frame,
+        textvariable=department_var,
+        values=("PT", "Dental", "Medical"),
+        state="readonly",
+    )
+    _prevent_combobox_mousewheel_value_change(department_field)
+    department_field.grid(row=4, column=2, sticky="ew", padx=(8, 0))
+
+    years_frame = ttk.Frame(form_frame, style="Card.TFrame")
+    years_frame.grid(row=5, column=0, columnspan=3, sticky="ew")
+    years_frame.columnconfigure(0, weight=1)
+    years_frame.columnconfigure(1, weight=1)
+
+    ttk.Label(years_frame, text="Latest Year", style="FieldLabel.TLabel").grid(
+        row=0, column=0, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(years_frame, textvariable=new_year_var).grid(row=1, column=0, sticky="ew", padx=(0, 8))
+
+    ttk.Label(years_frame, text="Oldest Year", style="FieldLabel.TLabel").grid(
+        row=0, column=1, sticky="w", pady=(10, 2)
+    )
+    ttk.Entry(years_frame, textvariable=old_year_var).grid(row=1, column=1, sticky="ew")
+    ttk.Label(
+        years_frame,
         textvariable=year_hint_var,
         style="CardMuted.TLabel",
         wraplength=560,
         justify="left",
-    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
     ttk.Label(form_frame, text="Final File Preview", style="FieldLabel.TLabel").grid(
-        row=8, column=0, columnspan=2, sticky="w", pady=(10, 2)
+        row=8, column=0, columnspan=3, sticky="w", pady=(10, 2)
     )
     ttk.Label(
         form_frame,
@@ -8170,10 +8571,10 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         style="CardMuted.TLabel",
         anchor="w",
         padding=(0, 6),
-    ).grid(row=9, column=0, columnspan=2, sticky="ew")
+    ).grid(row=9, column=0, columnspan=3, sticky="ew")
 
     ttk.Label(form_frame, text="Merge Summary", style="FieldLabel.TLabel").grid(
-        row=10, column=0, columnspan=2, sticky="w", pady=(10, 2)
+        row=10, column=0, columnspan=3, sticky="w", pady=(10, 2)
     )
     ttk.Label(
         form_frame,
@@ -8182,7 +8583,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         wraplength=560,
         justify="left",
         anchor="w",
-    ).grid(row=11, column=0, columnspan=2, sticky="ew")
+    ).grid(row=11, column=0, columnspan=3, sticky="ew")
 
     action_frame = ttk.Frame(content, style="ActionBar.TFrame", padding=(12, 10))
     action_frame.pack(fill="x", pady=(12, 0))
@@ -8205,7 +8606,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
             command=cancel_batch_processing_from_merge,
             style="Subtle.TButton",
             width=14,
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(8, 12))
 
     ttk.Button(
         action_buttons,
@@ -8213,7 +8614,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
         width=20,
         command=perform_merge,
         style="PrimaryAction.TButton",
-    ).pack(side="right")
+    ).pack(side="right", padx=(12, 0))
     win.bind("<Escape>", lambda _event: (close_merge_window(), "break")[1])
     win.after_idle(lambda: folder_field.focus_set())
     win.protocol("WM_DELETE_WINDOW", close_merge_window)
@@ -8307,10 +8708,10 @@ def employee_details_editor_window():
     win.title("Employee Details Editor")
     configure_window_geometry(
         win,
-        1080,
-        820,
-        min_width=860,
-        min_height=620,
+        980,
+        740,
+        min_width=760,
+        min_height=560,
         margin_x=DEFAULT_MARGIN_X,
         margin_y=DEFAULT_MARGIN_Y,
     )
@@ -8358,6 +8759,12 @@ def employee_details_editor_window():
 
     def _normalize_folder_search_value(value):
         return " ".join((value or "").lower().replace("\\", " ").replace("/", " ").split())
+
+    def _tokenize_folder_search_value(value):
+        normalized_value = _normalize_folder_search_value(value)
+        if not normalized_value:
+            return []
+        return [token for token in re.split(r"[^a-z0-9]+", normalized_value) if token]
 
     def _scan_employee_folder_paths():
         discovered = []
@@ -8419,11 +8826,13 @@ def employee_details_editor_window():
             searchable = _normalize_folder_search_value(
                 f"{employee_name} {relative_path} {candidate_path}"
             )
+            searchable_tokens = _tokenize_folder_search_value(searchable)
             entries.append(
                 {
                     "label": unique_label,
                     "path": candidate_path,
                     "searchable": searchable,
+                    "tokens": searchable_tokens,
                 }
             )
             label_to_path[unique_label] = candidate_path
@@ -8436,21 +8845,29 @@ def employee_details_editor_window():
             return []
 
         normalized_query = _normalize_folder_search_value(query)
-        if not normalized_query:
+        query_tokens = _tokenize_folder_search_value(query)
+        if not query_tokens:
             return [entry["label"] for entry in folder_suggestion_entries]
 
-        prefix_matches = []
-        contains_matches = []
+        exact_matches = []
+        ordered_matches = []
+        unordered_matches = []
 
         for entry in folder_suggestion_entries:
+            candidate_tokens = entry.get("tokens") or []
+            if not _name_search_matches(query_tokens, candidate_tokens):
+                continue
+
             searchable = entry["searchable"]
             label = entry["label"]
-            if searchable.startswith(normalized_query):
-                prefix_matches.append(label)
-            elif normalized_query in searchable:
-                contains_matches.append(label)
+            if searchable == normalized_query:
+                exact_matches.append(label)
+            elif searchable.startswith(normalized_query):
+                ordered_matches.append(label)
+            else:
+                unordered_matches.append(label)
 
-        return prefix_matches + contains_matches
+        return exact_matches + ordered_matches + unordered_matches
 
     def _update_folder_combobox_suggestions(combobox, query_text, event=None):
         suggestions = _get_filtered_folder_suggestions(query_text)
@@ -9101,7 +9518,7 @@ def employee_details_editor_window():
             highlightthickness=1,
             highlightbackground=LISTBOX_BORDER,
             highlightcolor=FOCUS_RING_COLOR,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
             padx=6,
             pady=6,
         )
@@ -9150,7 +9567,10 @@ def employee_details_editor_window():
         except RuntimeError as exc:
             messagebox.showerror("Error", f"Could not open PDF: {exc}", parent=win)
 
-    content = ttk.Frame(win, style="Shell.TFrame", padding=(16, 14, 16, 16))
+    scroll_container, scroll_frame = create_scrollable_panel(win)
+    scroll_container.pack(fill="both", expand=True)
+
+    content = ttk.Frame(scroll_frame, style="Shell.TFrame", padding=(16, 14, 16, 16))
     content.pack(fill="both", expand=True)
 
     header_card = ttk.Frame(content, style="HeaderCard.TFrame", padding=(14, 12))

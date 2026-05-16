@@ -21,6 +21,9 @@ build_run_logs
 
 # Local runtime settings
 settings.json
+employee_name_cache.json
+employee_name_cache.enc
+employee_name_cache.key
 
 # IDE and OS
 .vscode/

@@ -1,72 +1,110 @@
 # PDF Record Manager
 
-Desktop app for organizing, merging, and previewing PDF workflows with a modernized Tkinter UI.
+A Windows desktop app for organizing, merging, and reviewing PDF employee records.
+It provides fast search, guided save/merge workflows, and batch processing tools with a modernized Tkinter UI.
 
-## Release Artifacts
+## Features
 
-Each official release publishes two Windows distributions:
+- Save new records with structured folder paths and standardized filenames
+- Merge pending PDFs into existing records with preview and backup options
+- Flexible name and folder search (ignores punctuation and order)
+- Batch processing utilities and preview tools
+- Optional recycle bin cleanup (uses send2trash when available)
+- Persistent preferences and safe confirmation controls
 
-- Installer: PDFRecordManager-Setup.exe
-- Portable: PDFRecordManager-Portable.zip (contains PDFRecordManager-Portable/PDFRecordManager.exe)
+## Quick Start
 
-## Local Build Commands
+### Option 1: Download and run (recommended)
 
-Preferred (no BAT required):
+1. Go to the GitHub Releases page for this repository.
+2. Download one of the artifacts:
+   - Installer: PDFRecordManager-Setup.exe
+   - Portable: PDFRecordManager-Portable.zip
+3. Run the installer or extract the portable zip and launch the EXE.
 
-- `python scripts/build.py --target release`: build installer + portable together
-- `python scripts/build.py --target installer`: build installer only (requires Inno Setup)
-- `python scripts/build.py --target portable`: build portable package only
-- `python scripts/build.py --target onedir`: build folder-based executable only
-- `python scripts/build.py --target onefile`: build single executable only
-- `python scripts/build.py --target all`: build onedir + onefile together
+### Option 2: Run from source
 
-Optional Windows BAT wrappers (kept for convenience):
+Requirements:
+- Windows 10/11
+- Python 3.11+
 
-- `scripts/bat/build_onedir.bat`
-- `scripts/bat/build_onefile.bat`
-- `scripts/bat/build_installer.bat`
-- `scripts/bat/build_portable.bat`
-- `scripts/bat/build_release.bat`
+Steps:
 
-## Official GitHub Publishing
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python main.py
+```
 
-This repository includes GitHub automation in `.github/workflows/release.yml`.
+## Usage
 
-What it does:
+### Save new record
 
-- Builds installer and portable artifacts on Windows runner
-- Publishes assets to GitHub Releases
-- Generates and deploys `update-feed.json` to GitHub Pages
-- Publishes `update-feed.json` as a GitHub Release asset backup
-- Publishes SHA256 checksums for release verification
-- Stamps APP_VERSION and installer version from the release version
+1. Select the Records Root Folder and Pending Folder.
+2. Choose or type the employee name.
+3. Fill out year details and status.
+4. Save the record; the file is copied to the target folder and the pending file is archived.
 
-## Security Notes
+### Merge into existing record
 
-- Unsigned Windows executables can trigger SmartScreen or antivirus reputation warnings.
-- This risk is lower with onedir portable builds than onefile bundles, but warnings may still appear.
-- For official trusted distribution, sign executables and installer with a code-signing certificate.
+1. Select a pending PDF.
+2. Choose the destination employee folder.
+3. Pick the existing PDF to merge into.
+4. Review the summary, then merge and save.
 
-Trigger options:
+## Settings
 
-- Push a tag: v1.0.1
-- Run workflow manually with version input
+Preferences are saved in a local settings file and persist across sessions. You can customize:
 
-## Update Feed URL
+- Confirmation prompts for save and merge actions
+- Backup behavior when replacing PDFs
+- Display preferences (icons and text)
 
-After first workflow run with Pages enabled, your feed URL is:
+## Build Windows Distributions
 
-`https://raw.githubusercontent.com/OWNER/REPO/gh-pages/update-feed.json`
+These commands generate the installer and portable packages:
 
-The release workflow also embeds this URL into the published app build.
+```powershell
+python scripts/build.py --target release
+```
 
-Optional: if GitHub Pages is configured, `https://OWNER.github.io/REPO/update-feed.json`
-can also serve the same file.
+Other build options:
 
-Release asset fallback URL:
+```powershell
+python scripts/build.py --target installer
+python scripts/build.py --target portable
+python scripts/build.py --target onedir
+python scripts/build.py --target onefile
+python scripts/build.py --target all
+```
 
-`https://github.com/OWNER/REPO/releases/latest/download/update-feed.json`
+## Update Workflow
 
-## First-Time Setup
+Releases are published through GitHub Actions and a hosted update feed:
 
-Follow `PUBLISH_GITHUB.md` for one-time repository setup and first release steps.
+```powershell
+git tag v1.3.3
+git push origin v1.3.3
+```
+
+This produces:
+
+- Installer and portable artifacts
+- Update feed JSON for in-app checks
+
+See UPDATE_WORKFLOW.md and PUBLISH_GITHUB.md for details.
+
+## Troubleshooting
+
+- If recycle bin actions are unavailable, install send2trash.
+- If encryption features fail, ensure cryptography is installed.
+- If PDFs fail to open, confirm pypdf (or PyPDF2) is installed.
+
+## Contributing
+
+Pull requests are welcome. Please keep changes focused and include a short description of the behavior change.
+
+## License
+
+MIT License. See [LICENSE](LICENSE).

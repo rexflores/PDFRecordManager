@@ -11,5 +11,6 @@ pypiwin32==223
 pywin32==311
 pywin32-ctypes==0.2.3
 Send2Trash==2.1.0
+cryptography==46.0.6
 win10toast==0.9
 winotify==1.1.0
