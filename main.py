@@ -256,7 +256,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.4"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
