@@ -20,7 +20,7 @@ from ctypes import wintypes
 import signal
 from datetime import datetime
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, font as tkfont, messagebox, simpledialog, ttk
 
 try:
     from PIL import Image, ImageDraw, ImageTk
@@ -228,6 +228,34 @@ MIN_WINDOW_HEIGHT = 620
 DEFAULT_MARGIN_X = 60
 DEFAULT_MARGIN_Y = 120
 
+APP_DEFAULT_FONT_SIZE = 12
+APP_TEXT_FONT_SIZE = 12
+APP_SMALL_FONT_SIZE = 11
+APP_MENU_FONT_SIZE = 13
+_APP_MENU_FONT = None
+
+def _configure_application_fonts():
+    global _APP_MENU_FONT
+    try:
+        tkfont.nametofont("TkDefaultFont").configure(family="Segoe UI", size=APP_DEFAULT_FONT_SIZE)
+    except tk.TclError:
+        pass
+    try:
+        tkfont.nametofont("TkTextFont").configure(family="Segoe UI", size=APP_TEXT_FONT_SIZE)
+    except tk.TclError:
+        pass
+    try:
+        tkfont.nametofont("TkFixedFont").configure(family="Consolas", size=APP_TEXT_FONT_SIZE)
+    except tk.TclError:
+        pass
+
+    root.option_add("*Font", "TkDefaultFont")
+    _APP_MENU_FONT = tkfont.Font(root=root, family="Segoe UI", size=-APP_MENU_FONT_SIZE)
+    root.option_add("*Menu.font", _APP_MENU_FONT)
+
+
+_configure_application_fonts()
+
 ACCENT_COLOR = "#2D7FF9"
 BG_COLOR = "#0F172A"
 SURFACE_COLOR = "#1E293B"
@@ -341,7 +369,7 @@ def _apply_app_icon(window):
 
 
 def _scaled_font_size(size):
-    return max(9, int(round(size * _font_scale_factor)) + 1)
+    return max(10, int(round(size * _font_scale_factor)) + 2)
 
 
 def _font_regular(size):
@@ -481,6 +509,26 @@ def apply_theme(window):
         background=SHELL_BG_COLOR,
         foreground=TEXT_COLOR,
         font=_font_regular(11),
+    )
+    style.configure(
+        "TEntry",
+        font=_font_regular(11),
+    )
+    style.configure(
+        "TCombobox",
+        font=_font_regular(11),
+    )
+    style.configure(
+        "TCheckbutton",
+        font=_font_regular(11),
+    )
+    style.configure(
+        "TRadiobutton",
+        font=_font_regular(11),
+    )
+    style.configure(
+        "TMenubutton",
+        font=_font_semibold(11),
     )
     style.configure(
         "PendingRow.TFrame",
@@ -1730,6 +1778,7 @@ keep_backup_preference_var = tk.BooleanVar(value=False)
 show_text_with_icons_var = tk.BooleanVar(value=False)
 ui_scale_mode_var = tk.StringVar(value="auto")
 font_scale_mode_var = tk.StringVar(value="1.0")
+default_department_var = tk.StringVar(value="Medical")
 confirm_save_folder_exists_var = tk.BooleanVar(value=True)
 confirm_save_action_var = tk.BooleanVar(value=True)
 confirm_merge_main_var = tk.BooleanVar(value=True)
@@ -1772,124 +1821,10 @@ _ensure_global_enter_activation_binding()
 menubar = tk.Menu(root)
 
 file_menu = tk.Menu(menubar, tearoff=0)
-preferences_menu = tk.Menu(file_menu, tearoff=0)
-preferences_menu.add_checkbutton(
-    label="Pending Files Auto-refresh",
-    variable=auto_refresh_var,
-    command=lambda: _on_auto_refresh_preference_changed(),
-)
-preferences_menu.add_checkbutton(
-    label="Tray Notifications",
-    variable=tray_notifications_enabled_var,
-    command=lambda: _on_tray_notifications_preference_changed(),
-)
-preferences_menu.add_checkbutton(
-    label="Merge: Keep timestamped backup",
-    variable=keep_backup_preference_var,
-    command=lambda: _on_keep_backup_preference_changed(),
-)
-
-save_prompts_menu = tk.Menu(preferences_menu, tearoff=0)
-save_prompts_menu.add_checkbutton(
-    label="Confirm folder exists",
-    variable=confirm_save_folder_exists_var,
-    command=lambda: _on_confirm_preferences_changed(),
-)
-save_prompts_menu.add_checkbutton(
-    label="Confirm save action",
-    variable=confirm_save_action_var,
-    command=lambda: _on_confirm_preferences_changed(),
-)
-preferences_menu.add_cascade(label="Save Confirmations", menu=save_prompts_menu)
-
-merge_prompts_menu = tk.Menu(preferences_menu, tearoff=0)
-merge_prompts_menu.add_checkbutton(
-    label="Confirm merge action",
-    variable=confirm_merge_main_var,
-    command=lambda: _on_confirm_preferences_changed(),
-)
-merge_prompts_menu.add_checkbutton(
-    label="Confirm folder exists",
-    variable=confirm_merge_folder_exists_var,
-    command=lambda: _on_confirm_preferences_changed(),
-)
-merge_prompts_menu.add_checkbutton(
-    label="Confirm replace file",
-    variable=confirm_merge_replace_var,
-    command=lambda: _on_confirm_preferences_changed(),
-)
-merge_prompts_menu.add_checkbutton(
-    label="Confirm recycle original",
-    variable=confirm_merge_recycle_var,
-    command=lambda: _on_confirm_preferences_changed(),
-)
-preferences_menu.add_cascade(label="Merge Confirmations", menu=merge_prompts_menu)
-
-preferences_menu.add_checkbutton(
-    label="Show text with icons",
-    variable=show_text_with_icons_var,
-    command=lambda: _on_show_text_with_icons_preference_changed(),
-)
-
-display_scale_menu = tk.Menu(preferences_menu, tearoff=0)
-for label, value in UI_SCALE_MODE_OPTIONS:
-    display_scale_menu.add_radiobutton(
-        label=label,
-        variable=ui_scale_mode_var,
-        value=value,
-        command=lambda: _on_ui_scale_preference_changed(),
-    )
-preferences_menu.add_cascade(label="Display Scale", menu=display_scale_menu)
-
-font_scale_menu = tk.Menu(preferences_menu, tearoff=0)
-for label, value in FONT_SCALE_MODE_OPTIONS:
-    font_scale_menu.add_radiobutton(
-        label=label,
-        variable=font_scale_mode_var,
-        value=value,
-        command=lambda: _on_font_scale_preference_changed(),
-    )
-preferences_menu.add_cascade(label="Font Size", menu=font_scale_menu)
-
-name_filter_menu = tk.Menu(preferences_menu, tearoff=0)
-name_filter_menu.add_radiobutton(
-    label="Strict",
-    variable=name_filter_mode,
-    value="strict",
-)
-name_filter_menu.add_radiobutton(
-    label="Lenient",
-    variable=name_filter_mode,
-    value="lenient",
-)
-
-preferences_menu.add_cascade(label="Name Filter Mode", menu=name_filter_menu)
-file_menu.add_cascade(label="Preference", menu=preferences_menu)
+file_menu.add_command(label="Preferences...", command=lambda: _open_preferences_window())
 
 application_menu = tk.Menu(file_menu, tearoff=0)
 application_menu.add_command(label="Restart", command=lambda: restart_application())
-application_menu.add_separator()
-backup_cleanup_menu = tk.Menu(application_menu, tearoff=0)
-backup_cleanup_menu.add_command(
-    label="All (Records Root + Pending)",
-    command=lambda: clear_all_backup_folders(),
-)
-backup_cleanup_menu.add_command(
-    label="Records Root Folder Only",
-    command=lambda: clear_root_backup_folders(),
-)
-backup_cleanup_menu.add_command(
-    label="Pending Folder Only",
-    command=lambda: clear_pending_backup_folders(),
-)
-backup_cleanup_menu.add_separator()
-backup_cleanup_menu.add_command(
-    label="Selected Employee Folder Only...",
-    command=lambda: clear_selected_employee_folder_backups(),
-)
-application_menu.add_cascade(label="Clear Backup Folders", menu=backup_cleanup_menu)
-application_menu.add_separator()
-application_menu.add_command(label="Clear Name Cache", command=lambda: clear_employee_name_cache())
 application_menu.add_separator()
 application_menu.add_command(label="Exit", command=lambda: exit_application())
 file_menu.add_cascade(label="Application", menu=application_menu)
@@ -3771,6 +3706,7 @@ def load_settings(progress_callback=None):
     )
     ui_scale_mode_value = data.get("ui_scale_mode", ui_scale_mode_var.get())
     font_scale_mode_value = data.get("font_scale_mode", font_scale_mode_var.get())
+    default_department_value = data.get("default_department", default_department_var.get())
     show_text_with_icons_value = data.get(
         "show_text_with_icons",
         data.get("pending_toolbar_text_labels", show_text_with_icons_var.get()),
@@ -3815,6 +3751,7 @@ def load_settings(progress_callback=None):
         ui_scale_mode_var.set(ui_scale_mode_value)
     if font_scale_mode_value in _FONT_SCALE_MODE_VALUES:
         font_scale_mode_var.set(font_scale_mode_value)
+    default_department_var.set(_normalize_department_choice(default_department_value))
     _apply_font_scale(font_scale_mode_var.get())
     _apply_ui_scale(ui_scale_mode_var.get())
     configure_window_geometry(
@@ -3870,6 +3807,7 @@ def save_settings():
         "tray_notifications_enabled": tray_notifications_enabled_var.get(),
         "ui_scale_mode": ui_scale_mode_var.get(),
         "font_scale_mode": font_scale_mode_var.get(),
+        "default_department": default_department_var.get(),
         "show_text_with_icons": show_text_with_icons_var.get(),
         "rotation_preview_window_width": rotation_preview_window_width,
         "rotation_preview_window_height": rotation_preview_window_height,
@@ -4368,13 +4306,19 @@ def parse_filename_metadata(filename):
     earliest_year = ""
     employee_name = ""
 
-    if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+    if (
+        len(parts) >= 3
+        and parts[-1].isdigit()
+        and parts[-2].isdigit()
+        and len(parts[-1]) == 4
+        and len(parts[-2]) == 4
+    ):
         latest_val = max(int(parts[-2]), int(parts[-1]))
         earliest_val = min(int(parts[-2]), int(parts[-1]))
         latest_year = str(latest_val)
         earliest_year = str(earliest_val)
         employee_name = "_".join(parts[:-2])
-    elif parts[-1].isdigit():
+    elif parts[-1].isdigit() and len(parts[-1]) == 4:
         latest_year = str(int(parts[-1]))
         earliest_year = ""
         employee_name = "_".join(parts[:-1])
@@ -4453,6 +4397,13 @@ def _normalize_department_suffix(department_value):
     department = str(department_value or "").strip()
     if not department or department.lower() == "medical":
         return ""
+    return department
+
+
+def _normalize_department_choice(department_value):
+    department = str(department_value or "").strip()
+    if department not in {"PT", "Dental", "Medical"}:
+        return "Medical"
     return department
 
 
@@ -5496,6 +5447,253 @@ def _on_show_text_with_icons_preference_changed():
     save_settings()
 
 
+def _add_preferences_checkbox(parent, text, variable, command=None, row=0, column=0, columnspan=1, padx=(0, 0), pady=(0, 0)):
+    widget = ttk.Checkbutton(parent, text=text, variable=variable)
+    if command is not None:
+        widget.configure(command=command)
+    widget.grid(row=row, column=column, columnspan=columnspan, sticky="w", padx=padx, pady=pady)
+    return widget
+
+
+def _add_preferences_radiobutton(parent, text, variable, value, command=None, row=0, column=0, padx=(0, 0), pady=(0, 0)):
+    widget = ttk.Radiobutton(parent, text=text, variable=variable, value=value)
+    if command is not None:
+        widget.configure(command=command)
+    widget.grid(row=row, column=column, sticky="w", padx=padx, pady=pady)
+    return widget
+
+
+def _open_preferences_window():
+    existing_window = getattr(root, "_preferences_window", None)
+    if existing_window is not None:
+        try:
+            if existing_window.winfo_exists():
+                existing_window.lift()
+                existing_window.focus_force()
+                return existing_window
+        except tk.TclError:
+            pass
+
+    win = tk.Toplevel(root)
+    root._preferences_window = win
+    _apply_app_icon(win)
+    win.title("Preferences")
+    configure_window_geometry(win, 860, 680, min_width=760, min_height=560)
+    win.transient(root)
+    win.lift()
+    win.focus_force()
+    apply_theme(win)
+
+    def _close_window():
+        try:
+            save_settings()
+        finally:
+            try:
+                if getattr(root, "_preferences_window", None) is win:
+                    root._preferences_window = None
+            except Exception:
+                pass
+            if win.winfo_exists():
+                win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", _close_window)
+
+    container = ttk.Frame(win, padding=(16, 14, 16, 16), style="Shell.TFrame")
+    container.pack(fill="both", expand=True)
+
+    header = ttk.Frame(container, style="HeaderCard.TFrame", padding=(12, 10))
+    header.pack(fill="x", pady=(0, 12))
+    ttk.Label(header, text="Preferences", style="HeaderTitle.TLabel").pack(anchor="w")
+    ttk.Label(
+        header,
+        text="Adjust app behavior by category. Changes are saved automatically when you change them.",
+        style="HeaderSubheading.TLabel",
+        wraplength=760,
+        justify="left",
+    ).pack(anchor="w", pady=(4, 0))
+
+    notebook = ttk.Notebook(container)
+    notebook.pack(fill="both", expand=True)
+
+    general_tab = ttk.Frame(notebook, style="Shell.TFrame", padding=14)
+    confirm_tab = ttk.Frame(notebook, style="Shell.TFrame", padding=14)
+    display_tab = ttk.Frame(notebook, style="Shell.TFrame", padding=14)
+    maintenance_tab = ttk.Frame(notebook, style="Shell.TFrame", padding=14)
+
+    notebook.add(general_tab, text="General")
+    notebook.add(confirm_tab, text="Confirmations")
+    notebook.add(display_tab, text="Display")
+    notebook.add(maintenance_tab, text="Maintenance")
+
+    general_card = ttk.Frame(general_tab, style="Card.TFrame", padding=14)
+    general_card.pack(fill="x", pady=(0, 12))
+    general_card.columnconfigure(0, weight=1)
+
+    ttk.Label(general_card, text="General Behavior", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+    _add_preferences_checkbox(
+        general_card,
+        "Pending files auto-refresh",
+        auto_refresh_var,
+        command=_on_auto_refresh_preference_changed,
+        row=1,
+        column=0,
+        pady=(10, 0),
+    )
+    _add_preferences_checkbox(
+        general_card,
+        "Tray notifications",
+        tray_notifications_enabled_var,
+        command=_on_tray_notifications_preference_changed,
+        row=2,
+        column=0,
+        pady=(6, 0),
+    )
+    _add_preferences_checkbox(
+        general_card,
+        "Merge: keep timestamped backup",
+        keep_backup_preference_var,
+        command=_on_keep_backup_preference_changed,
+        row=3,
+        column=0,
+        pady=(6, 0),
+    )
+    _add_preferences_checkbox(
+        general_card,
+        "Show text with icons",
+        show_text_with_icons_var,
+        command=_on_show_text_with_icons_preference_changed,
+        row=4,
+        column=0,
+        pady=(6, 0),
+    )
+
+    ttk.Label(general_card, text="Default Department", style="FieldLabel.TLabel").grid(row=5, column=0, sticky="w", pady=(12, 2))
+    default_department_field = ttk.Combobox(
+        general_card,
+        textvariable=default_department_var,
+        values=("PT", "Dental", "Medical"),
+        state="readonly",
+    )
+    _prevent_combobox_mousewheel_value_change(default_department_field)
+    default_department_field.grid(row=6, column=0, sticky="w")
+    default_department_field.bind("<<ComboboxSelected>>", lambda _event: save_settings())
+
+    search_card = ttk.Frame(general_tab, style="Card.TFrame", padding=14)
+    search_card.pack(fill="x")
+    search_card.columnconfigure(0, weight=1)
+
+    ttk.Label(search_card, text="Name Search Mode", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(
+        search_card,
+        text="Strict matches are exact. Lenient matches are broader and tolerate partial tokens.",
+        style="CardMuted.TLabel",
+        wraplength=700,
+        justify="left",
+    ).grid(row=1, column=0, sticky="w", pady=(4, 8))
+
+    name_filter_buttons = ttk.Frame(search_card, style="Card.TFrame")
+    name_filter_buttons.grid(row=2, column=0, sticky="w")
+    _add_preferences_radiobutton(name_filter_buttons, "Strict", name_filter_mode, "strict", row=0, column=0)
+    _add_preferences_radiobutton(name_filter_buttons, "Lenient", name_filter_mode, "lenient", row=0, column=1, padx=(16, 0))
+
+    confirm_card = ttk.Frame(confirm_tab, style="Card.TFrame", padding=14)
+    confirm_card.pack(fill="both", expand=True)
+    confirm_card.columnconfigure(0, weight=1)
+    confirm_card.columnconfigure(1, weight=1)
+
+    ttk.Label(confirm_card, text="Save Confirmations", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(confirm_card, text="Merge Confirmations", style="SectionTitle.TLabel").grid(row=0, column=1, sticky="w")
+
+    save_group = ttk.Frame(confirm_card, style="Card.TFrame")
+    save_group.grid(row=1, column=0, sticky="nsew", padx=(0, 10), pady=(10, 0))
+    merge_group = ttk.Frame(confirm_card, style="Card.TFrame")
+    merge_group.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(10, 0))
+
+    _add_preferences_checkbox(save_group, "Confirm folder exists", confirm_save_folder_exists_var, command=_on_confirm_preferences_changed, row=0, column=0)
+    _add_preferences_checkbox(save_group, "Confirm save action", confirm_save_action_var, command=_on_confirm_preferences_changed, row=1, column=0, pady=(6, 0))
+
+    _add_preferences_checkbox(merge_group, "Confirm merge action", confirm_merge_main_var, command=_on_confirm_preferences_changed, row=0, column=0)
+    _add_preferences_checkbox(merge_group, "Confirm folder exists", confirm_merge_folder_exists_var, command=_on_confirm_preferences_changed, row=1, column=0, pady=(6, 0))
+    _add_preferences_checkbox(merge_group, "Confirm replace file", confirm_merge_replace_var, command=_on_confirm_preferences_changed, row=2, column=0, pady=(6, 0))
+    _add_preferences_checkbox(merge_group, "Confirm recycle original", confirm_merge_recycle_var, command=_on_confirm_preferences_changed, row=3, column=0, pady=(6, 0))
+
+    display_card = ttk.Frame(display_tab, style="Card.TFrame", padding=14)
+    display_card.pack(fill="both", expand=True)
+    display_card.columnconfigure(0, weight=1)
+    display_card.columnconfigure(1, weight=1)
+
+    ttk.Label(display_card, text="Display Scale", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(display_card, text="Font Size", style="SectionTitle.TLabel").grid(row=0, column=1, sticky="w")
+
+    display_scale_group = ttk.Frame(display_card, style="Card.TFrame")
+    display_scale_group.grid(row=1, column=0, sticky="nsew", padx=(0, 10), pady=(10, 0))
+    font_scale_group = ttk.Frame(display_card, style="Card.TFrame")
+    font_scale_group.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(10, 0))
+
+    for idx, (label, value) in enumerate(UI_SCALE_MODE_OPTIONS):
+        _add_preferences_radiobutton(
+            display_scale_group,
+            label,
+            ui_scale_mode_var,
+            value,
+            command=_on_ui_scale_preference_changed,
+            row=idx,
+            column=0,
+            pady=(0, 4),
+        )
+
+    for idx, (label, value) in enumerate(FONT_SCALE_MODE_OPTIONS):
+        _add_preferences_radiobutton(
+            font_scale_group,
+            label,
+            font_scale_mode_var,
+            value,
+            command=_on_font_scale_preference_changed,
+            row=idx,
+            column=0,
+            pady=(0, 4),
+        )
+
+    maintenance_card = ttk.Frame(maintenance_tab, style="Card.TFrame", padding=14)
+    maintenance_card.pack(fill="both", expand=True)
+    maintenance_card.columnconfigure(0, weight=1)
+
+    ttk.Label(maintenance_card, text="Cache and Backups", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(
+        maintenance_card,
+        text="Use these tools when you need to clean cached names or remove backup folders.",
+        style="CardMuted.TLabel",
+        wraplength=700,
+        justify="left",
+    ).grid(row=1, column=0, sticky="w", pady=(6, 12))
+
+    maintenance_actions = ttk.Frame(maintenance_card, style="Card.TFrame")
+    maintenance_actions.grid(row=2, column=0, sticky="ew")
+    maintenance_actions.columnconfigure(0, weight=1)
+    maintenance_actions.columnconfigure(1, weight=1)
+
+    backup_group = ttk.Frame(maintenance_actions, style="Card.TFrame")
+    backup_group.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+    cache_group = ttk.Frame(maintenance_actions, style="Card.TFrame")
+    cache_group.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+
+    ttk.Label(backup_group, text="Backup Folders", style="SectionTitle.TLabel").pack(anchor="w")
+    ttk.Button(backup_group, text="Clear All Backup Folders", style="Subtle.TButton", command=clear_all_backup_folders).pack(fill="x", pady=(8, 0))
+    ttk.Button(backup_group, text="Clear Records Root Backups", style="Subtle.TButton", command=clear_root_backup_folders).pack(fill="x", pady=(8, 0))
+    ttk.Button(backup_group, text="Clear Pending Backups", style="Subtle.TButton", command=clear_pending_backup_folders).pack(fill="x", pady=(8, 0))
+    ttk.Button(backup_group, text="Clear Selected Employee Folder Backups", style="Subtle.TButton", command=clear_selected_employee_folder_backups).pack(fill="x", pady=(8, 0))
+
+    ttk.Label(cache_group, text="Cache", style="SectionTitle.TLabel").pack(anchor="w")
+    ttk.Button(cache_group, text="Clear Name Cache", style="Subtle.TButton", command=clear_employee_name_cache).pack(fill="x", pady=(8, 0))
+
+    footer = ttk.Frame(container, style="ActionBar.TFrame", padding=(12, 10))
+    footer.pack(fill="x", pady=(12, 0))
+    ttk.Label(footer, text="Preferences are saved automatically.", style="ActionTitle.TLabel").pack(side="left")
+    ttk.Button(footer, text="Close", style="SecondaryAction.TButton", command=_close_window, width=14).pack(side="right")
+
+    return win
+
+
 def _format_pending_filename_for_display(filename, max_length=62):
     if not filename or len(filename) <= max_length:
         return filename
@@ -6493,7 +6691,7 @@ def rotate_selected_pending_pdfs(
                 text=f"{file_name} ({page_count} page{'s' if page_count != 1 else ''})",
                 bg=row_bg_normal,
                 fg=TEXT_COLOR,
-                font=("Segoe UI Semibold", 11),
+                font=_font_semibold(11),
                 justify="left",
                 wraplength=980,
                 anchor="w",
@@ -6581,7 +6779,7 @@ def rotate_selected_pending_pdfs(
                         text=f"Page {page_index + 1}",
                         bg=page_bg_normal,
                         fg=TEXT_COLOR,
-                        font=("Segoe UI", 10),
+                        font=_font_regular(10),
                         anchor="w",
                     )
                     page_title.pack(anchor="w")
@@ -6629,7 +6827,7 @@ def rotate_selected_pending_pdfs(
                         text=f"Page {page_index + 1} / {page_count}",
                         bg=page_bg_normal,
                         fg=TEXT_COLOR,
-                        font=("Segoe UI", 10),
+                        font=_font_regular(10),
                         anchor="w",
                     )
                     page_label.pack(anchor="w")
@@ -6874,7 +7072,7 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
     name_var = tk.StringVar()
     letter_var = tk.StringVar()
     status_var = tk.StringVar(value="Active")
-    department_var = tk.StringVar(value="Medical")
+    department_var = tk.StringVar(value=_normalize_department_choice(default_department_var.get()))
     new_year_var = tk.StringVar()
     old_year_var = tk.StringVar()
     year_hint_var = tk.StringVar(value=_get_year_input_guidance("", ""))
@@ -6900,7 +7098,12 @@ def new_record_window(initial_filename=None, batch_context=None, on_complete=Non
             return
 
         letter_segment = current_letter or (name[0].upper() if name else "#")
-        years = _normalize_record_year_inputs(latest, earliest)
+        try:
+            years = _normalize_record_year_inputs(latest, earliest)
+        except ValueError:
+            dest_path_var.set(_get_year_input_guidance(latest, earliest))
+            return
+
         if years is not None:
             latest_year, earliest_year = years
             preview_filename = _build_record_filename(name, latest_year, earliest_year, department_value)
@@ -7359,7 +7562,7 @@ def merge_existing_window(pending_filename=None, batch_context=None, on_complete
     name_var = tk.StringVar()
     letter_var = tk.StringVar()
     status_var = tk.StringVar(value="Active")
-    department_var = tk.StringVar(value="Medical")
+    department_var = tk.StringVar(value=_normalize_department_choice(default_department_var.get()))
     new_year_var = tk.StringVar()
     old_year_var = tk.StringVar()
     year_hint_var = tk.StringVar(value=_get_year_input_guidance("", ""))
@@ -9518,7 +9721,7 @@ def employee_details_editor_window():
             highlightthickness=1,
             highlightbackground=LISTBOX_BORDER,
             highlightcolor=FOCUS_RING_COLOR,
-            font=("Segoe UI", 10),
+            font=_font_regular(10),
             padx=6,
             pady=6,
         )
