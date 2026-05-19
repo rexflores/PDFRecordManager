@@ -1,5 +1,5 @@
 #define MyAppName "PDF Record Manager"
-#define MyAppVersion "1.3.4"
+#define MyAppVersion "1.3.5"
 #define MyAppPublisher "PDF Record Manager"
 #define MyAppExeName "PDFRecordManager.exe"
 

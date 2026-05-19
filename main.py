@@ -284,7 +284,7 @@ FOCUS_RING_COLOR = "#7fb4ff"
 
 AUTO_REFRESH_INTERVAL_MS = 1000
 APP_ICON_PREFERRED_NAMES = ("app.ico", "application.ico", "icon.ico")
-APP_VERSION = "1.3.4"
+APP_VERSION = "1.3.5"
 APP_BUILD_COMMIT = os.environ.get("PDF_AUTOTOOL_COMMIT", "unknown")
 APP_BUILD_DATE = os.environ.get("PDF_AUTOTOOL_BUILD_DATE", "unknown")
 APP_BUILD_INFO_FILENAME = "build_info.json"
@@ -9812,18 +9812,23 @@ def employee_details_editor_window():
 
     folder_picker_row = ttk.Frame(workspace_card, style="Card.TFrame")
     folder_picker_row.grid(row=2, column=0, sticky="ew")
+    folder_picker_row.columnconfigure(0, weight=1)
 
     folder_field = ttk.Combobox(folder_picker_row, textvariable=folder_var, state="normal")
-    folder_field.pack(side="left", fill="x", expand=True, padx=(0, 8))
+    folder_field.grid(row=0, column=0, columnspan=2, sticky="ew")
     _prevent_combobox_mousewheel_value_change(folder_field)
+
+    folder_picker_actions = ttk.Frame(folder_picker_row, style="Card.TFrame")
+    folder_picker_actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+
     ttk.Button(
-        folder_picker_row,
+        folder_picker_actions,
         text="Browse",
         command=_browse_employee_folder,
         style="Subtle.TButton",
     ).pack(side="left", padx=(0, 8))
     ttk.Button(
-        folder_picker_row,
+        folder_picker_actions,
         text="Open Folder",
         command=_open_selected_folder,
         style="Subtle.TButton",
