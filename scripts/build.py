@@ -13,6 +13,12 @@ SET_METADATA_SCRIPT = SCRIPTS_DIR / "set_release_metadata.py"
 ONEDIR_SPEC = ROOT_DIR / "PDFRecordManager.spec"
 ONEFILE_SPEC = ROOT_DIR / "PDFRecordManager.onefile.spec"
 INSTALLER_FILE = ROOT_DIR / "installer" / "PDFRecordManager.iss"
+NUITKA_OUTPUT_DIR = ROOT_DIR / "dist" / "nuitka"
+STAGED_RELEASE_DIR = ROOT_DIR / "dist" / "PDFRecordManager"
+NIGHTLY_ARTIFACT_DIRS = (
+    ROOT_DIR / "build",
+    ROOT_DIR / "dist",
+)
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+([\-+\.][0-9A-Za-z.-]+)?$")
 
@@ -36,6 +42,17 @@ def _run_command(command, step_label):
     result = subprocess.run(command, cwd=ROOT_DIR)
     if result.returncode != 0:
         raise RuntimeError(f"{step_label} failed with exit code {result.returncode}.")
+
+
+def _run_nuitka_command(python_exe, args, step_label):
+    command = [python_exe, "-m", "nuitka"] + list(args)
+    _run_command(command, step_label)
+
+
+def _clean_release_environment():
+    for path in NIGHTLY_ARTIFACT_DIRS:
+        if path.exists():
+            shutil.rmtree(path)
 
 
 def _resolve_python_executable(python_override=None):
@@ -137,6 +154,97 @@ def _build_onefile(python_exe, step_label="[1] Building onefile executable..."):
     )
 
 
+def _resolve_nuitka_artifact():
+    if not NUITKA_OUTPUT_DIR.exists():
+        raise RuntimeError(f"Missing Nuitka output directory: {NUITKA_OUTPUT_DIR}")
+
+    dist_candidates = sorted(
+        path for path in NUITKA_OUTPUT_DIR.glob("*.dist") if path.is_dir()
+    )
+    if not dist_candidates:
+        raise RuntimeError(
+            f"Unable to locate Nuitka standalone output under {NUITKA_OUTPUT_DIR}."
+        )
+
+    return dist_candidates[0]
+
+
+def _stage_nuitka_release(artifact_path):
+    if STAGED_RELEASE_DIR.exists():
+        shutil.rmtree(STAGED_RELEASE_DIR)
+    STAGED_RELEASE_DIR.mkdir(parents=True, exist_ok=True)
+
+    exe_candidate = None
+    for item in artifact_path.iterdir():
+        if item.is_file() and item.suffix.lower() == ".exe":
+            if item.name.lower() == "pdfrecordmanager.exe":
+                exe_candidate = item
+                break
+            if exe_candidate is None:
+                exe_candidate = item
+
+    if exe_candidate is None:
+        raise RuntimeError(
+            f"Unable to locate the Nuitka executable inside {artifact_path}."
+        )
+
+    target_exe = STAGED_RELEASE_DIR / "PDFRecordManager.exe"
+    shutil.copy2(exe_candidate, target_exe)
+
+    for item in artifact_path.iterdir():
+        if item == exe_candidate:
+            continue
+        destination = STAGED_RELEASE_DIR / item.name
+        if item.is_dir():
+            shutil.copytree(item, destination)
+        else:
+            shutil.copy2(item, destination)
+
+
+def _build_nuitka_release(python_exe, version=None):
+    if version:
+        file_version = version
+    else:
+        file_version = None
+
+    _clean_release_environment()
+    NUITKA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    command_args = [
+        "--standalone",
+        "--windows-console-mode=disable",
+        "--enable-plugin=tk-inter",
+        f"--output-dir={NUITKA_OUTPUT_DIR}",
+        "--windows-icon-from-ico=application.ico",
+        "--include-data-file=application.ico=application.ico",
+        "--include-data-file=build_info.json=build_info.json",
+        "--include-package=pypdf",
+        "--include-package=pdfplumber",
+        "--include-package=openpyxl",
+    ]
+
+    if file_version:
+        command_args.extend(
+            [
+                f"--file-version={file_version}",
+                f"--product-version={file_version}",
+                "--product-name=PDF Record Manager",
+                "--company-name=PDF Record Manager",
+            ]
+        )
+
+    command_args.append(str(ROOT_DIR / "main.py"))
+
+    _run_nuitka_command(
+        python_exe,
+        command_args,
+        "[1] Building Nuitka standalone executable...",
+    )
+
+    artifact_path = _resolve_nuitka_artifact()
+    _stage_nuitka_release(artifact_path)
+
+
 def _build_installer(iscc_exe):
     if not INSTALLER_FILE.exists():
         raise RuntimeError(f"Missing installer script: {INSTALLER_FILE}")
@@ -195,6 +303,8 @@ def _print_outputs(target):
         print("Folder: dist\\portable")
         print("EXE   : dist\\portable\\PDFRecordManager-Portable\\PDFRecordManager.exe")
         print("ZIP   : dist\\portable\\PDFRecordManager-Portable.zip")
+    elif target == "nuitka":
+        print("Output: dist\\PDFRecordManager\\PDFRecordManager.exe")
     else:
         print("Installer: dist\\installer\\PDFRecordManager-Setup.exe")
         print("Portable : dist\\portable\\PDFRecordManager-Portable.zip")
@@ -229,6 +339,12 @@ def main():
         default=None,
         help="Optional override for ISCC.exe path.",
     )
+    parser.add_argument(
+        "--backend",
+        choices=("pyinstaller", "nuitka"),
+        default="pyinstaller",
+        help="Build backend to use (default: pyinstaller).",
+    )
     args = parser.parse_args()
 
     try:
@@ -246,7 +362,11 @@ def main():
         if args.version:
             _sync_release_metadata(python_exe, args.version, args.update_url)
 
-        if args.target == "onefile":
+        if args.backend == "nuitka":
+            if args.target == "onefile":
+                raise RuntimeError("Nuitka backend does not support onefile builds. Use --target onedir or --target release.")
+            _build_nuitka_release(python_exe, args.version)
+        elif args.target == "onefile":
             _build_onefile(python_exe)
         elif args.target == "all":
             _build_onedir(python_exe)
@@ -261,6 +381,16 @@ def main():
                 _build_installer(iscc_exe)
 
             if args.target in {"release", "portable"}:
+                print("[3] Packaging portable bundle...")
+                _write_portable_archive()
+
+        if args.backend == "nuitka":
+            if args.target in {"release", "installer", "all"}:
+                iscc_exe = _resolve_iscc_executable(args.iscc_exe)
+                print(f"Using ISCC: {iscc_exe}")
+                _build_installer(iscc_exe)
+
+            if args.target in {"release", "portable", "all"}:
                 print("[3] Packaging portable bundle...")
                 _write_portable_archive()
 

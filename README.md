@@ -63,7 +63,32 @@ Preferences are saved in a local settings file and persist across sessions. You 
 
 ## Build Windows Distributions
 
-These commands generate the installer and portable packages:
+The build script supports two backends:
+
+- PyInstaller: keeps the current installer and portable packaging flow.
+- Nuitka: compiles the app to native code and is the recommended option if you are trying to reduce VirusTotal false positives.
+
+To try Nuitka, install it first:
+
+```powershell
+pip install nuitka
+```
+
+Then build with Nuitka:
+
+```powershell
+python scripts/build.py --backend nuitka --target release
+```
+
+This will clean prior build artifacts, compile the app as a standalone Nuitka build, stage the output for packaging, and still let the script create the installer and portable bundle.
+
+If you only want the standalone executable folder, use:
+
+```powershell
+python scripts/build.py --backend nuitka --target onedir
+```
+
+The existing PyInstaller build flow is still available:
 
 ```powershell
 python scripts/build.py --target release
@@ -75,7 +100,6 @@ Other build options:
 python scripts/build.py --target installer
 python scripts/build.py --target portable
 python scripts/build.py --target onedir
-python scripts/build.py --target onefile
 python scripts/build.py --target all
 ```
 
