@@ -73,7 +73,7 @@ jobs:
             throw "Invalid version format: $versionInput"
           }
 
-          $feedUrl = "https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/gh-pages/update-feed.json"
+          $feedUrl = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/update-feed.json"
 
           "version=$versionInput" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "feed_url=$feedUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -214,7 +214,12 @@ jobs:
     needs: build-and-release
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -244,10 +249,11 @@ jobs:
           </html>
           HTML
 
-      - name: Publish update feed to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site
-          publish_branch: gh-pages
-          force_orphan: true
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

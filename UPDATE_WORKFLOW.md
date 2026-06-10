@@ -11,9 +11,7 @@ The official publishing path is GitHub Releases + GitHub Pages, automated by:
 1. Push this project to GitHub.
 2. In repository settings:
 Actions > General > Workflow permissions = Read and write permissions
-Pages > Source = Deploy from a branch
-Pages > Branch = gh-pages
-Pages > Folder = /(root)
+Pages > Source = GitHub Actions
 
 Detailed step-by-step commands are in PUBLISH_GITHUB.md.
 
@@ -65,7 +63,7 @@ App behavior:
 
 Feed URL format:
 
-`https://raw.githubusercontent.com/OWNER/REPO/gh-pages/update-feed.json`
+`https://OWNER.github.io/REPO/update-feed.json`
 
 Optional GitHub Pages alias (if configured):
 
