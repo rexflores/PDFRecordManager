@@ -22,9 +22,7 @@ In GitHub repository settings:
 1. Actions > General:
 Workflow permissions: Read and write permissions
 2. Pages:
-Source: Deploy from a branch
-Branch: gh-pages
-Folder: /(root)
+Source: GitHub Actions
 
 ## 3) Create your first official release
 
@@ -54,7 +52,7 @@ After workflow success:
 
 Feed URL format:
 
-`https://raw.githubusercontent.com/OWNER/REPO/gh-pages/update-feed.json`
+`https://OWNER.github.io/REPO/update-feed.json`
 
 Optional GitHub Pages alias (if configured):
 
